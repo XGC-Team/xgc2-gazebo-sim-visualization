@@ -1,0 +1,42 @@
+schema: xgc2.product.v1
+id: xgc2-gazebo-sim-visualization
+name: XGC2 Gazebo Sim Visualization
+version: 1.0.43-1
+kind: ros1-apt
+summary: RViz visualization tools for XGC2 Gazebo Classic simulations.
+
+ros:
+  distro: noetic
+  packages:
+    - gazebo_sim_visualization
+
+apt:
+  distribution: focal
+  install:
+    - ros-noetic-xgc2-gazebo-sim-visualization
+  packages:
+    - ros-noetic-xgc2-gazebo-sim-visualization
+  depends:
+    - ros-noetic-gazebo-msgs
+    - ros-noetic-geometry-msgs
+    - ros-noetic-robot-state-publisher
+    - ros-noetic-roscpp
+    - ros-noetic-roslaunch
+    - ros-noetic-rviz
+    - ros-noetic-sensor-msgs
+    - ros-noetic-tf2-ros
+    - ros-noetic-visualization-msgs
+    - ros-noetic-xgc2-gazebo-sim-fs150-sitl (>= 1.0.14-1)
+    - ros-noetic-xgc2-gazebo-sim-scout
+
+usage:
+  install: |
+    sudo apt update
+    sudo apt install ros-noetic-xgc2-gazebo-sim-visualization
+  smoke_test: |
+    roslaunch --files gazebo_sim_visualization gazebo_auto_visualization_rviz.launch rviz:=false
+
+ownership:
+  paths:
+    - /opt/ros/noetic/share/gazebo_sim_visualization
+    - /opt/ros/noetic/lib/gazebo_sim_visualization
