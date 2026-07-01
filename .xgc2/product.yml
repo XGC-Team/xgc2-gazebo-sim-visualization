@@ -1,7 +1,7 @@
 schema: xgc2.product.v1
 id: xgc2-gazebo-sim-visualization
 name: XGC2 Gazebo Sim Visualization
-version: 1.0.43-1
+version: 1.0.44-1
 kind: ros1-apt
 summary: RViz visualization tools for XGC2 Gazebo Classic simulations.
 
