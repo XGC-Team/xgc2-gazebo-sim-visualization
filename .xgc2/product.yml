@@ -1,7 +1,7 @@
 schema: xgc2.product.v1
 id: xgc2-gazebo-sim-visualization
 name: XGC2 Gazebo Sim Visualization
-version: 1.0.45-1
+version: 1.1.0-1
 kind: ros1-apt
 summary: RViz visualization tools for XGC2 Gazebo Classic simulations.
 
@@ -26,7 +26,7 @@ apt:
     - ros-noetic-sensor-msgs
     - ros-noetic-tf2-ros
     - ros-noetic-visualization-msgs
-    - ros-noetic-xgc2-gazebo-sim-fs150-sitl (>= 1.0.14-1)
+    - ros-noetic-xgc2-gazebo-sim-fs150-sitl (>= 1.1.0-1)
     - ros-noetic-xgc2-gazebo-sim-scout
 
 usage:
