@@ -63,16 +63,17 @@ docker run --rm \
       rsync \
       ros-noetic-gazebo-msgs \
       ros-noetic-geometry-msgs \
+      ros-noetic-mavros-msgs \
       ros-noetic-robot-state-publisher \
       ros-noetic-roscpp \
       ros-noetic-roslaunch \
       ros-noetic-rospack \
       ros-noetic-rviz \
       ros-noetic-sensor-msgs \
+      ros-noetic-std-msgs \
       ros-noetic-tf2-ros \
       ros-noetic-visualization-msgs \
-      ros-noetic-xgc2-gazebo-sim-fs150-sitl \
-      ros-noetic-xgc2-gazebo-sim-scout
+      ros-noetic-xgc2-robot-visualization
 
     rm -rf /workspace/work/src /workspace/work/build /workspace/work/devel /workspace/work/install-root
     mkdir -p /workspace/work/src/xgc2-gazebo-sim-visualization
