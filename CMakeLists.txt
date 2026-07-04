@@ -6,15 +6,17 @@ add_compile_options(-std=c++14)
 find_package(catkin REQUIRED COMPONENTS
   gazebo_msgs
   geometry_msgs
+  mavros_msgs
   roscpp
   roslaunch
-  sensor_msgs
+  std_msgs
   tf2_ros
   visualization_msgs
+  xgc2_robot_visualization
 )
 
 catkin_package(
-  CATKIN_DEPENDS gazebo_msgs geometry_msgs roscpp sensor_msgs tf2_ros visualization_msgs
+  CATKIN_DEPENDS gazebo_msgs geometry_msgs mavros_msgs roscpp std_msgs tf2_ros visualization_msgs xgc2_robot_visualization
 )
 
 include_directories(
@@ -24,11 +26,16 @@ include_directories(
 add_executable(gazebo_auto_visualizer_node
   src/gazebo_auto_visualizer_node.cpp
 )
+add_dependencies(gazebo_auto_visualizer_node
+  ${catkin_EXPORTED_TARGETS}
+)
 target_link_libraries(gazebo_auto_visualizer_node
   ${catkin_LIBRARIES}
 )
 
 install(TARGETS gazebo_auto_visualizer_node
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

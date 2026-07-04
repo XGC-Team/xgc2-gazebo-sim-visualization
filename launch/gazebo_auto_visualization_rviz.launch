@@ -8,7 +8,16 @@
   <arg name="path_limit" default="3000"/>
   <arg name="vrpn_timeout" default="0.5"/>
   <arg name="joint_state_timeout" default="0.5"/>
+  <arg name="mavros_state_timeout" default="2.0"/>
+  <arg name="mavros_state_topic_suffix" default="/mavros/state"/>
   <arg name="rotor_speed_rad_s" default="70.0"/>
+  <arg name="ugv_motion_timeout" default="0.5"/>
+  <arg name="ugv_cmd_vel_topic_suffix" default="/cmd_vel"/>
+  <arg name="ugv_twist_topic_suffix" default="/twist"/>
+  <arg name="ugv_visual_wheel_radius" default="0.08"/>
+  <arg name="ugv_visual_track_width" default="0.416"/>
+  <arg name="ugv_wheel_motion_deadband" default="0.02"/>
+  <arg name="ugv_max_visual_wheel_speed_rad_s" default="35.0"/>
   <arg name="rviz" default="true"/>
   <arg name="rviz_config" default="$(find gazebo_sim_visualization)/rviz/gazebo_auto_visualization.rviz"/>
 
@@ -26,7 +35,16 @@
       <param name="path_limit" value="$(arg path_limit)"/>
       <param name="vrpn_timeout" value="$(arg vrpn_timeout)"/>
       <param name="joint_state_timeout" value="$(arg joint_state_timeout)"/>
+      <param name="mavros_state_timeout" value="$(arg mavros_state_timeout)"/>
+      <param name="mavros_state_topic_suffix" value="$(arg mavros_state_topic_suffix)"/>
       <param name="rotor_speed_rad_s" value="$(arg rotor_speed_rad_s)"/>
+      <param name="ugv_motion_timeout" value="$(arg ugv_motion_timeout)"/>
+      <param name="ugv_cmd_vel_topic_suffix" value="$(arg ugv_cmd_vel_topic_suffix)"/>
+      <param name="ugv_twist_topic_suffix" value="$(arg ugv_twist_topic_suffix)"/>
+      <param name="ugv_visual_wheel_radius" value="$(arg ugv_visual_wheel_radius)"/>
+      <param name="ugv_visual_track_width" value="$(arg ugv_visual_track_width)"/>
+      <param name="ugv_wheel_motion_deadband" value="$(arg ugv_wheel_motion_deadband)"/>
+      <param name="ugv_max_visual_wheel_speed_rad_s" value="$(arg ugv_max_visual_wheel_speed_rad_s)"/>
     </node>
   </group>
 
