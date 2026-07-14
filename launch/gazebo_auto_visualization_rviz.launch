@@ -2,6 +2,13 @@
   <arg name="frame_id" default="world"/>
   <arg name="model_states_topic" default="/gazebo/model_states"/>
   <arg name="vrpn_pose_prefix" default="/vrpn_client_node"/>
+  <arg name="tracked_uav_models" default=""/>
+  <arg name="allow_auto_discovery" default="true"/>
+  <arg name="track_ugv" default="true"/>
+  <arg name="publish_markers" default="true"/>
+  <arg name="publish_transforms" default="true"/>
+  <arg name="publish_scene_update" default="false"/>
+  <arg name="scene_update_topic" default="/xgc/scene"/>
   <arg name="publish_rate" default="30.0"/>
   <arg name="path_publish_rate" default="10.0"/>
   <arg name="path_history_duration" default="15.0"/>
@@ -29,6 +36,13 @@
       <param name="frame_id" value="$(arg frame_id)"/>
       <param name="model_states_topic" value="$(arg model_states_topic)"/>
       <param name="vrpn_pose_prefix" value="$(arg vrpn_pose_prefix)"/>
+      <param name="tracked_uav_models" value="$(arg tracked_uav_models)"/>
+      <param name="allow_auto_discovery" value="$(arg allow_auto_discovery)"/>
+      <param name="track_ugv" value="$(arg track_ugv)"/>
+      <param name="publish_markers" value="$(arg publish_markers)"/>
+      <param name="publish_transforms" value="$(arg publish_transforms)"/>
+      <param name="publish_scene_update" value="$(arg publish_scene_update)"/>
+      <param name="scene_update_topic" value="$(arg scene_update_topic)"/>
       <param name="publish_rate" value="$(arg publish_rate)"/>
       <param name="path_publish_rate" value="$(arg path_publish_rate)"/>
       <param name="path_history_duration" value="$(arg path_history_duration)"/>
