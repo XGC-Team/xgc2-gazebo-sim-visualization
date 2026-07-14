@@ -2,7 +2,7 @@
 <package format="2">
   <name>gazebo_sim_visualization</name>
   <version>0.1.0</version>
-  <description>Gazebo Classic adapter for reusable XGC2 RViz robot visualizers.</description>
+  <description>Gazebo Classic adapter for reusable XGC2 RViz and Lichtblick robot visualizers.</description>
 
   <maintainer email="lxk@example.com">lxk</maintainer>
   <license>Proprietary</license>
@@ -12,6 +12,7 @@
   <build_depend>roslaunch</build_depend>
 
   <depend>gazebo_msgs</depend>
+  <depend>foxglove_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>mavros_msgs</depend>
   <depend>roscpp</depend>

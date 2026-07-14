@@ -4,6 +4,7 @@ project(gazebo_sim_visualization)
 add_compile_options(-std=c++14)
 
 find_package(catkin REQUIRED COMPONENTS
+  foxglove_msgs
   gazebo_msgs
   geometry_msgs
   mavros_msgs
@@ -16,7 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 catkin_package(
-  CATKIN_DEPENDS gazebo_msgs geometry_msgs mavros_msgs roscpp std_msgs tf2_ros visualization_msgs xgc2_robot_visualization
+  CATKIN_DEPENDS foxglove_msgs gazebo_msgs geometry_msgs mavros_msgs roscpp std_msgs tf2_ros visualization_msgs xgc2_robot_visualization
 )
 
 include_directories(

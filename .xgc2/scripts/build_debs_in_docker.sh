@@ -68,6 +68,7 @@ docker run --rm \
       file \
       git \
       rsync \
+      ros-noetic-foxglove-msgs \
       ros-noetic-gazebo-msgs \
       ros-noetic-geometry-msgs \
       ros-noetic-mavros-msgs \
