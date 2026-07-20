@@ -25,7 +25,7 @@ apt:
   - ros-noetic-std-msgs
   - ros-noetic-tf2-ros
   - ros-noetic-visualization-msgs
-  - ros-noetic-xgc2-robot-visualization (>= 0.1.0-6)
+  - ros-noetic-xgc2-robot-visualization (>= 0.1.0-5)
 usage:
   install: 'sudo apt update
 
