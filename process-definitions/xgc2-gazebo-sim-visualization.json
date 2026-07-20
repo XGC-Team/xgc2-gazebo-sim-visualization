@@ -145,6 +145,132 @@
       },
       "digest": "",
       "internal": true
+    },
+    {
+      "id": "lichtblick-robot-scene",
+      "version": "1.3.0",
+      "label": "Lichtblick mixed robot scene publisher",
+      "description": "Internal run-aware publisher for immutable PX4 and Scout model lists using foxglove_msgs/SceneUpdate.",
+      "drivers": ["host"],
+      "parameters": {
+        "properties": {
+          "uavModels": {
+            "type": "string",
+            "description": "Comma-separated UAV Gazebo/VRPN model names derived from the immutable Swarm Asset snapshot",
+            "default": ""
+          },
+          "ugvModels": {
+            "type": "string",
+            "description": "Comma-separated UGV Gazebo/VRPN model names derived from the immutable Swarm Asset snapshot",
+            "default": ""
+          },
+          "rosMasterPort": {
+            "type": "integer",
+            "description": "Existing ROS 1 master port",
+            "default": 11311,
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceClaims": [
+        {
+          "bindingKey": "node",
+          "kind": "custom",
+          "mode": "",
+          "capacity": 0,
+          "namespace": "ros-node",
+          "identityParts": [
+            { "parameter": "rosMasterPort" },
+            { "literal": "/xgc2_lichtblick_robot_scene" }
+          ]
+        },
+        {
+          "bindingKey": "scene-topic",
+          "kind": "custom",
+          "mode": "",
+          "capacity": 0,
+          "namespace": "ros-topic-publisher",
+          "identityParts": [
+            { "parameter": "rosMasterPort" },
+            { "literal": "/xgc/scene" }
+          ]
+        }
+      ],
+      "command": {
+        "executable": "/opt/ros/noetic/lib/gazebo_sim_visualization/gazebo_auto_visualizer_node",
+        "args": [
+          "__name:=xgc2_lichtblick_robot_scene",
+          "_frame_id:=world",
+          "_model_states_topic:=/gazebo/model_states",
+          "_vrpn_pose_prefix:=/vrpn_client_node",
+          "_tracked_uav_models:=${uavModels}",
+          "_tracked_ugv_models:=${ugvModels}",
+          "_allow_auto_discovery:=false",
+          "_track_ugv:=true",
+          "_publish_markers:=false",
+          "_publish_transforms:=false",
+          "_publish_scene_update:=true",
+          "_scene_update_topic:=/xgc/scene"
+        ],
+        "env": {
+          "CMAKE_PREFIX_PATH": "/opt/ros/noetic",
+          "LD_LIBRARY_PATH": "/opt/ros/noetic/lib:/opt/ros/noetic/lib/x86_64-linux-gnu:/opt/ros/noetic/lib/aarch64-linux-gnu",
+          "PATH": "/opt/ros/noetic/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "PKG_CONFIG_PATH": "/opt/ros/noetic/lib/pkgconfig",
+          "PYTHONPATH": "/opt/ros/noetic/lib/python3/dist-packages",
+          "ROS_DISTRO": "noetic",
+          "ROS_ETC_DIR": "/opt/ros/noetic/etc/ros",
+          "ROS_MASTER_URI": "http://127.0.0.1:${rosMasterPort}",
+          "ROS_PACKAGE_PATH": "/opt/ros/noetic/share",
+          "ROS_PYTHON_VERSION": "3",
+          "ROS_ROOT": "/opt/ros/noetic/share/ros",
+          "ROS_VERSION": "1"
+        }
+      },
+      "readiness": {
+        "kind": "exec",
+        "command": {
+          "executable": "/usr/bin/python3",
+          "args": [
+            "-c",
+            "import sys\nimport time\n\nimport rospy\nfrom foxglove_msgs.msg import SceneUpdate\n\ntopic, uav_csv, ugv_csv = sys.argv[1:]\nexpected = {\n    \"xgc2/px4/\" + name\n    for name in (part.strip() for part in uav_csv.split(\",\"))\n    if name\n}\nexpected.update({\n    \"xgc2/scout/\" + name\n    for name in (part.strip() for part in ugv_csv.split(\",\"))\n    if name\n})\nif not expected:\n    raise SystemExit(\"Lichtblick scene readiness requires at least one immutable robot entity\")\n\nrospy.init_node(\"xgc2_scene_readiness_probe\", anonymous=True, disable_signals=True)\ndeadline = time.monotonic() + 4.0\nseen = set()\nwhile time.monotonic() < deadline:\n    remaining = deadline - time.monotonic()\n    try:\n        message = rospy.wait_for_message(topic, SceneUpdate, timeout=max(0.05, remaining))\n    except rospy.ROSException:\n        break\n    seen.update(entity.id for entity in message.entities)\n    missing = expected - seen\n    if not missing:\n        raise SystemExit(0)\nraise SystemExit(\"Lichtblick scene is missing immutable robot entities: \" + \",\".join(sorted(expected - seen)))\n",
+            "/xgc/scene",
+            "${uavModels}",
+            "${ugvModels}"
+          ],
+          "env": {
+            "CMAKE_PREFIX_PATH": "/opt/ros/noetic",
+            "LD_LIBRARY_PATH": "/opt/ros/noetic/lib:/opt/ros/noetic/lib/x86_64-linux-gnu:/opt/ros/noetic/lib/aarch64-linux-gnu",
+            "PATH": "/opt/ros/noetic/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "PKG_CONFIG_PATH": "/opt/ros/noetic/lib/pkgconfig",
+            "PYTHONPATH": "/opt/ros/noetic/lib/python3/dist-packages",
+            "ROS_DISTRO": "noetic",
+            "ROS_ETC_DIR": "/opt/ros/noetic/etc/ros",
+            "ROS_MASTER_URI": "http://127.0.0.1:${rosMasterPort}",
+            "ROS_PACKAGE_PATH": "/opt/ros/noetic/share",
+            "ROS_PYTHON_VERSION": "3",
+            "ROS_ROOT": "/opt/ros/noetic/share/ros",
+            "ROS_VERSION": "1"
+          }
+        },
+        "interval": 10000000000,
+        "timeout": 5000000000,
+        "successThreshold": 1,
+        "failureThreshold": 3
+      },
+      "liveness": {
+        "kind": "process",
+        "interval": 1000000000,
+        "timeout": 1000000000,
+        "successThreshold": 1,
+        "failureThreshold": 2
+      },
+      "stop": { "gracePeriod": 5000000000 },
+      "restart": { "mode": "never", "maxRestarts": 0, "backoff": 0 },
+      "digest": "",
+      "internal": true
     }
   ]
 }

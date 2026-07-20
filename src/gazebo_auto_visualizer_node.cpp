@@ -99,6 +99,8 @@ class GazeboAutoVisualizer {
         private_nh_.param("publish_transforms", publish_transforms_, true);
         private_nh_.param("publish_scene_update", publish_scene_update_, false);
         private_nh_.param("publish_rate", publish_rate_, 30.0);
+        private_nh_.param("scene_publish_rate", scene_publish_rate_, 10.0);
+        private_nh_.param("scene_path_publish_rate", scene_path_publish_rate_, 2.0);
         private_nh_.param("path_publish_rate", path_publish_rate_, 10.0);
         private_nh_.param("path_limit", path_limit_, 3000);
         private_nh_.param("path_history_duration", path_history_duration_sec_, 15.0);
@@ -117,6 +119,8 @@ class GazeboAutoVisualizer {
         private_nh_.param("ugv_mesh_scale", ugv_mesh_scale_, 1.0);
 
         publish_rate_ = std::max(1.0, publish_rate_);
+        scene_publish_rate_ = std::min(publish_rate_, std::max(1.0, scene_publish_rate_));
+        scene_path_publish_rate_ = std::min(publish_rate_, std::max(0.1, scene_path_publish_rate_));
         path_publish_rate_ = std::max(1.0, path_publish_rate_);
         mavros_state_timeout_sec_ = std::max(0.0, mavros_state_timeout_sec_);
         ugv_motion_timeout_sec_ = std::max(0.0, ugv_motion_timeout_sec_);
@@ -166,6 +170,8 @@ class GazeboAutoVisualizer {
         }
         if (publish_scene_update_) {
             scene_update_pub_ = nh_.advertise<foxglove_msgs::SceneUpdate>(scene_update_topic_, 1, true);
+            scene_update_cadence_.reset(
+                new gazebo_sim_visualization::SceneUpdateCadence(scene_publish_rate_, scene_path_publish_rate_));
             publishSceneReset();
         }
 
@@ -391,6 +397,15 @@ class GazeboAutoVisualizer {
 
     void publishCallback(const ros::TimerEvent&) {
         const ros::Time now = ros::Time::now();
+        gazebo_sim_visualization::SceneUpdateCadenceDecision scene_decision;
+        if (publish_scene_update_) {
+            scene_decision = scene_update_cadence_->take(now);
+        }
+        if (!publish_markers_ && !publish_transforms_ && !scene_decision.publish_robot &&
+            !scene_decision.publish_path) {
+            return;
+        }
+
         visualization_msgs::MarkerArray markers;
         std::vector<geometry_msgs::TransformStamped> transforms;
         foxglove_msgs::SceneUpdate scene_update;
@@ -408,16 +423,28 @@ class GazeboAutoVisualizer {
                 state.rotors_active = rotorsActive(model, now);
                 state.stamp = now;
                 uav_visualizer_->append(state, &markers, &transforms);
-                if (publish_scene_update_) {
-                    gazebo_sim_visualization::appendSceneEntity(model.kind, model.name, markers, first_marker, now,
-                                                                frame_id_, &scene_update);
+                if (scene_decision.publish_robot) {
+                    gazebo_sim_visualization::appendSceneEntityPart(
+                        model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kRobot, markers,
+                        first_marker, now, frame_id_, &scene_update);
+                }
+                if (scene_decision.publish_path) {
+                    gazebo_sim_visualization::appendSceneEntityPart(
+                        model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
+                        now, frame_id_, &scene_update);
                 }
             } else {
                 const std::size_t first_marker = markers.markers.size();
                 ugv_visualizer_->append(makeUgvVisualState(model, *pose, now), &markers, &transforms);
-                if (publish_scene_update_) {
-                    gazebo_sim_visualization::appendSceneEntity(model.kind, model.name, markers, first_marker, now,
-                                                                frame_id_, &scene_update);
+                if (scene_decision.publish_robot) {
+                    gazebo_sim_visualization::appendSceneEntityPart(
+                        model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kRobot, markers,
+                        first_marker, now, frame_id_, &scene_update);
+                }
+                if (scene_decision.publish_path) {
+                    gazebo_sim_visualization::appendSceneEntityPart(
+                        model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
+                        now, frame_id_, &scene_update);
                 }
             }
         }
@@ -428,7 +455,7 @@ class GazeboAutoVisualizer {
         if (publish_markers_) {
             marker_pub_.publish(markers);
         }
-        if (publish_scene_update_) {
+        if (publish_scene_update_ && !scene_update.entities.empty()) {
             scene_update_pub_.publish(scene_update);
         }
     }
@@ -445,6 +472,7 @@ class GazeboAutoVisualizer {
     std::set<std::string> configured_ugv_models_;
     std::unique_ptr<xgc2_robot_visualization::Fs150UavVisualizer> uav_visualizer_;
     std::unique_ptr<xgc2_robot_visualization::ScoutUgvVisualizer> ugv_visualizer_;
+    std::unique_ptr<gazebo_sim_visualization::SceneUpdateCadence> scene_update_cadence_;
 
     std::string frame_id_;
     std::string model_states_topic_;
@@ -456,6 +484,8 @@ class GazeboAutoVisualizer {
     std::string ugv_cmd_vel_topic_suffix_{"/cmd_vel"};
     std::string ugv_twist_topic_suffix_{"/twist"};
     double publish_rate_{30.0};
+    double scene_publish_rate_{10.0};
+    double scene_path_publish_rate_{2.0};
     double path_publish_rate_{10.0};
     int path_limit_{3000};
     double path_history_duration_sec_{15.0};

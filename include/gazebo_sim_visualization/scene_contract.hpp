@@ -12,6 +12,33 @@ namespace gazebo_sim_visualization {
 
 enum class RobotModelKind { kNone, kUav, kUgv };
 
+// SceneEntity updates replace the complete entity with the same ID. Keep the
+// high-rate robot geometry and the lower-rate path in separate entities so a
+// pose update cannot erase a path which was intentionally not retransmitted.
+enum class SceneEntityPart { kRobot, kPath };
+
+struct SceneUpdateCadenceDecision {
+    bool publish_robot{false};
+    bool publish_path{false};
+};
+
+class SceneUpdateCadence {
+  public:
+    SceneUpdateCadence(double robot_publish_rate, double path_publish_rate);
+
+    SceneUpdateCadenceDecision take(const ros::Time& now);
+
+  private:
+    bool takeGate(const ros::Time& now, double rate, bool* initialized, ros::Time* last_stamp);
+
+    double robot_publish_rate_;
+    double path_publish_rate_;
+    bool robot_initialized_{false};
+    bool path_initialized_{false};
+    ros::Time last_robot_stamp_;
+    ros::Time last_path_stamp_;
+};
+
 std::set<std::string> parseModelNames(const std::string& csv);
 
 bool modelListsAreDisjoint(const std::set<std::string>& uav_models, const std::set<std::string>& ugv_models);
@@ -22,8 +49,14 @@ RobotModelKind selectRobotModelKind(const std::string& model_name, const std::se
 
 std::string sceneEntityID(RobotModelKind kind, const std::string& model_name);
 
+std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name, SceneEntityPart part);
+
 void appendSceneEntity(RobotModelKind kind, const std::string& model_name,
                        const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
                        const ros::Time& timestamp, const std::string& frame_id, foxglove_msgs::SceneUpdate* update);
+
+void appendSceneEntityPart(RobotModelKind kind, const std::string& model_name, SceneEntityPart part,
+                           const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
+                           const ros::Time& timestamp, const std::string& frame_id, foxglove_msgs::SceneUpdate* update);
 
 } // namespace gazebo_sim_visualization

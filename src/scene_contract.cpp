@@ -141,21 +141,80 @@ std::string sceneEntityID(RobotModelKind kind, const std::string& model_name) {
     throw std::invalid_argument("scene entity requires a concrete robot model kind");
 }
 
-void appendSceneEntity(RobotModelKind kind, const std::string& model_name,
-                       const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
-                       const ros::Time& timestamp, const std::string& frame_id, foxglove_msgs::SceneUpdate* update) {
+std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name, SceneEntityPart part) {
+    const std::string robot_id = sceneEntityID(kind, model_name);
+    return part == SceneEntityPart::kPath ? robot_id + "/path" : robot_id;
+}
+
+SceneUpdateCadence::SceneUpdateCadence(double robot_publish_rate, double path_publish_rate)
+    : robot_publish_rate_(std::max(1.0, robot_publish_rate)), path_publish_rate_(std::max(0.1, path_publish_rate)) {}
+
+bool SceneUpdateCadence::takeGate(const ros::Time& now, double rate, bool* initialized, ros::Time* last_stamp) {
+    if (initialized == nullptr || last_stamp == nullptr) {
+        throw std::invalid_argument("scene update cadence gate state must be valid");
+    }
+    if (!*initialized || now < *last_stamp) {
+        *initialized = true;
+        *last_stamp = now;
+        return true;
+    }
+
+    const double elapsed = (now - *last_stamp).toSec();
+    const double period = 1.0 / rate;
+    if (elapsed + 1.0e-9 < period) {
+        return false;
+    }
+
+    // Advance by whole periods instead of assigning `now`. This avoids
+    // accumulating timer quantisation drift when the source timer frequency is
+    // not an integer multiple of the requested SceneUpdate rate.
+    const double elapsed_periods = std::floor((elapsed + 1.0e-9) / period);
+    *last_stamp += ros::Duration(elapsed_periods * period);
+    return true;
+}
+
+SceneUpdateCadenceDecision SceneUpdateCadence::take(const ros::Time& now) {
+    SceneUpdateCadenceDecision decision;
+    decision.publish_robot = takeGate(now, robot_publish_rate_, &robot_initialized_, &last_robot_stamp_);
+    decision.publish_path = takeGate(now, path_publish_rate_, &path_initialized_, &last_path_stamp_);
+    return decision;
+}
+
+namespace {
+
+bool markerBelongsToPart(const visualization_msgs::Marker& marker, SceneEntityPart part) {
+    static const std::string path_suffix = "_actual_path";
+    const bool is_path = marker.type == visualization_msgs::Marker::LINE_STRIP &&
+                         marker.ns.size() >= path_suffix.size() &&
+                         marker.ns.compare(marker.ns.size() - path_suffix.size(), path_suffix.size(), path_suffix) == 0;
+    if (part == SceneEntityPart::kPath) {
+        return is_path;
+    }
+    return !is_path;
+}
+
+void appendSceneEntityImpl(RobotModelKind kind, const std::string& entity_id,
+                           const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
+                           const ros::Time& timestamp, const std::string& frame_id, const SceneEntityPart* part,
+                           foxglove_msgs::SceneUpdate* update) {
     if (update == nullptr || first_marker > markers.markers.size()) {
         throw std::invalid_argument("scene entity output and marker range must be valid");
+    }
+    if (kind == RobotModelKind::kNone) {
+        throw std::invalid_argument("scene entity requires a concrete robot model kind");
     }
     foxglove_msgs::SceneEntity entity;
     entity.timestamp = timestamp;
     entity.frame_id = frame_id;
-    entity.id = sceneEntityID(kind, model_name);
+    entity.id = entity_id;
     entity.lifetime = ros::Duration(0.0);
     entity.frame_locked = false;
 
     for (std::size_t index = first_marker; index < markers.markers.size(); ++index) {
         const visualization_msgs::Marker& marker = markers.markers[index];
+        if (part != nullptr && !markerBelongsToPart(marker, *part)) {
+            continue;
+        }
         switch (marker.type) {
         case visualization_msgs::Marker::MESH_RESOURCE: {
             foxglove_msgs::ModelPrimitive primitive;
@@ -197,6 +256,23 @@ void appendSceneEntity(RobotModelKind kind, const std::string& model_name,
     if (!entity.models.empty() || !entity.lines.empty() || !entity.texts.empty()) {
         update->entities.push_back(std::move(entity));
     }
+}
+
+} // namespace
+
+void appendSceneEntity(RobotModelKind kind, const std::string& model_name,
+                       const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
+                       const ros::Time& timestamp, const std::string& frame_id, foxglove_msgs::SceneUpdate* update) {
+    appendSceneEntityImpl(kind, sceneEntityID(kind, model_name), markers, first_marker, timestamp, frame_id, nullptr,
+                          update);
+}
+
+void appendSceneEntityPart(RobotModelKind kind, const std::string& model_name, SceneEntityPart part,
+                           const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
+                           const ros::Time& timestamp, const std::string& frame_id,
+                           foxglove_msgs::SceneUpdate* update) {
+    appendSceneEntityImpl(kind, sceneEntityPartID(kind, model_name, part), markers, first_marker, timestamp, frame_id,
+                          &part, update);
 }
 
 } // namespace gazebo_sim_visualization
