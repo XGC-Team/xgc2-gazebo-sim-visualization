@@ -9,7 +9,6 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   mavros_msgs
   roscpp
-  roslaunch
   std_msgs
   tf2_ros
   visualization_msgs
@@ -45,5 +44,6 @@ install(DIRECTORY launch rviz
 )
 
 if(CATKIN_ENABLE_TESTING)
+  find_package(roslaunch REQUIRED)
   roslaunch_add_file_check(launch/gazebo_auto_visualization_rviz.launch)
 endif()

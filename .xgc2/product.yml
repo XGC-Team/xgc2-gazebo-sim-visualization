@@ -40,3 +40,6 @@ ownership:
   paths:
   - /opt/ros/noetic/share/gazebo_sim_visualization
   - /opt/ros/noetic/lib/gazebo_sim_visualization
+release:
+  dependency_policy:
+    xgc2-robot-visualization: rebuild
