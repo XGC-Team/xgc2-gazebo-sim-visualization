@@ -2,18 +2,23 @@
   "apiVersion": "xgc.execution.process/v1",
   "definitions": [
     {
-      "id": "lichtblick-px4-scene",
-      "version": "1.3.0",
-      "label": "Lichtblick PX4 scene publisher",
-      "description": "Internal run-aware publisher for PX4 multirotor models and actual path history using foxglove_msgs/SceneUpdate.",
+      "id": "lichtblick-robot-scene",
+      "version": "1.1.0",
+      "label": "Lichtblick mixed robot scene publisher",
+      "description": "Internal run-aware publisher for immutable PX4 and Scout model lists using foxglove_msgs/SceneUpdate.",
       "drivers": [
         "host"
       ],
       "parameters": {
         "properties": {
-          "robotModels": {
+          "uavModels": {
             "type": "string",
-            "description": "Comma-separated Gazebo/VRPN model names derived from the immutable Swarm Asset snapshot",
+            "description": "Comma-separated UAV Gazebo/VRPN model names derived from the immutable Swarm Asset snapshot",
+            "default": ""
+          },
+          "ugvModels": {
+            "type": "string",
+            "description": "Comma-separated UGV Gazebo/VRPN model names derived from the immutable Swarm Asset snapshot",
             "default": ""
           },
           "rosMasterPort": {
@@ -38,7 +43,7 @@
               "parameter": "rosMasterPort"
             },
             {
-              "literal": "/xgc2_lichtblick_px4_scene"
+              "literal": "/xgc2_lichtblick_robot_scene"
             }
           ]
         }
@@ -46,13 +51,14 @@
       "command": {
         "executable": "/opt/ros/noetic/lib/gazebo_sim_visualization/gazebo_auto_visualizer_node",
         "args": [
-          "__name:=xgc2_lichtblick_px4_scene",
+          "__name:=xgc2_lichtblick_robot_scene",
           "_frame_id:=world",
           "_model_states_topic:=/gazebo/model_states",
           "_vrpn_pose_prefix:=/vrpn_client_node",
-          "_tracked_uav_models:=${robotModels}",
+          "_tracked_uav_models:=${uavModels}",
+          "_tracked_ugv_models:=${ugvModels}",
           "_allow_auto_discovery:=false",
-          "_track_ugv:=false",
+          "_track_ugv:=true",
           "_publish_markers:=false",
           "_publish_transforms:=false",
           "_publish_scene_update:=true",
@@ -107,7 +113,7 @@
           "executable": "/opt/ros/noetic/bin/rosnode",
           "args": [
             "info",
-            "/xgc2_lichtblick_px4_scene"
+            "/xgc2_lichtblick_robot_scene"
           ],
           "env": {
             "CMAKE_PREFIX_PATH": "/opt/ros/noetic",

@@ -3,24 +3,19 @@
 #include <cmath>
 #include <map>
 #include <memory>
-#include <regex>
 #include <set>
-#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "gazebo_sim_visualization/scene_contract.hpp"
 #include "xgc2_robot_visualization/fs150_uav_visualizer.hpp"
 #include "xgc2_robot_visualization/scout_ugv_visualizer.hpp"
 
-#include <gazebo_msgs/ModelStates.h>
-#include <foxglove_msgs/Color.h>
-#include <foxglove_msgs/LinePrimitive.h>
-#include <foxglove_msgs/ModelPrimitive.h>
-#include <foxglove_msgs/SceneEntity.h>
 #include <foxglove_msgs/SceneEntityDeletion.h>
 #include <foxglove_msgs/SceneUpdate.h>
-#include <foxglove_msgs/TextPrimitive.h>
+#include <gazebo_msgs/ModelStates.h>
 #include <geometry_msgs/Pose.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Quaternion.h>
@@ -29,7 +24,6 @@
 #include <geometry_msgs/TwistStamped.h>
 #include <mavros_msgs/State.h>
 #include <ros/ros.h>
-#include <std_msgs/ColorRGBA.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <visualization_msgs/MarkerArray.h>
 
@@ -88,48 +82,6 @@ std::string lower(std::string value) {
     return value;
 }
 
-bool isUavModel(const std::string& name) {
-    static const std::regex pattern("^(uav|tello)[0-9]+$");
-    return std::regex_match(name, pattern);
-}
-
-bool isUgvModel(const std::string& name) {
-    static const std::regex pattern("^ugv[0-9]+$");
-    const std::string normalized = lower(name);
-    return std::regex_match(normalized, pattern) || normalized.find("scout") != std::string::npos;
-}
-
-std::string trim(const std::string& value) {
-    const std::string whitespace = " \t\r\n";
-    const std::size_t first = value.find_first_not_of(whitespace);
-    if (first == std::string::npos) {
-        return std::string();
-    }
-    return value.substr(first, value.find_last_not_of(whitespace) - first + 1);
-}
-
-std::set<std::string> parseNames(const std::string& csv) {
-    std::set<std::string> names;
-    std::stringstream stream(csv);
-    std::string item;
-    while (std::getline(stream, item, ',')) {
-        item = trim(item);
-        if (!item.empty()) {
-            names.insert(item);
-        }
-    }
-    return names;
-}
-
-foxglove_msgs::Color copyColor(const std_msgs::ColorRGBA& source) {
-    foxglove_msgs::Color color;
-    color.r = source.r;
-    color.g = source.g;
-    color.b = source.b;
-    color.a = source.a;
-    return color;
-}
-
 } // namespace
 
 class GazeboAutoVisualizer {
@@ -139,6 +91,7 @@ class GazeboAutoVisualizer {
         private_nh_.param<std::string>("model_states_topic", model_states_topic_, "/gazebo/model_states");
         private_nh_.param<std::string>("vrpn_pose_prefix", vrpn_pose_prefix_, "/vrpn_client_node");
         private_nh_.param<std::string>("tracked_uav_models", tracked_uav_models_csv_, "");
+        private_nh_.param<std::string>("tracked_ugv_models", tracked_ugv_models_csv_, "");
         private_nh_.param<std::string>("scene_update_topic", scene_update_topic_, "/xgc/scene");
         private_nh_.param("allow_auto_discovery", allow_auto_discovery_, true);
         private_nh_.param("track_ugv", track_ugv_, true);
@@ -196,9 +149,16 @@ class GazeboAutoVisualizer {
         ugv_config.max_visual_wheel_speed_rad_s = ugv_max_visual_wheel_speed_rad_s_;
         ugv_visualizer_.reset(new xgc2_robot_visualization::ScoutUgvVisualizer(ugv_config));
 
-        configured_uav_models_ = parseNames(tracked_uav_models_csv_);
+        configured_uav_models_ = gazebo_sim_visualization::parseModelNames(tracked_uav_models_csv_);
+        configured_ugv_models_ = gazebo_sim_visualization::parseModelNames(tracked_ugv_models_csv_);
+        if (!gazebo_sim_visualization::modelListsAreDisjoint(configured_uav_models_, configured_ugv_models_)) {
+            throw std::runtime_error("tracked UAV and UGV model lists must be disjoint");
+        }
         for (const std::string& name : configured_uav_models_) {
-            ensureTrackedModel(name, ModelKind::kUav);
+            ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kUav);
+        }
+        for (const std::string& name : configured_ugv_models_) {
+            ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kUgv);
         }
 
         if (publish_markers_) {
@@ -215,11 +175,9 @@ class GazeboAutoVisualizer {
     }
 
   private:
-    enum class ModelKind { kUav, kUgv };
-
     struct TrackedModel {
         std::string name;
-        ModelKind kind;
+        gazebo_sim_visualization::RobotModelKind kind;
         geometry_msgs::Pose gazebo_pose;
         geometry_msgs::Pose vrpn_pose;
         bool has_gazebo_pose{false};
@@ -240,7 +198,8 @@ class GazeboAutoVisualizer {
         ros::Subscriber twist_subscriber;
     };
 
-    std::map<std::string, TrackedModel>::iterator ensureTrackedModel(const std::string& name, ModelKind kind) {
+    std::map<std::string, TrackedModel>::iterator ensureTrackedModel(const std::string& name,
+                                                                     gazebo_sim_visualization::RobotModelKind kind) {
         auto existing = models_.find(name);
         if (existing != models_.end()) {
             return existing;
@@ -250,7 +209,7 @@ class GazeboAutoVisualizer {
         model.name = name;
         model.kind = kind;
         model.vrpn_subscriber = subscribeVrpn(name);
-        if (kind == ModelKind::kUav) {
+        if (kind == gazebo_sim_visualization::RobotModelKind::kUav) {
             model.mavros_state_subscriber = subscribeMavrosState(name);
         } else {
             model.cmd_vel_subscriber = subscribeUgvCmdVel(name);
@@ -258,17 +217,16 @@ class GazeboAutoVisualizer {
         }
         auto inserted = models_.emplace(name, std::move(model)).first;
         ROS_INFO("[gazebo_auto_visualizer] Tracking %s model '%s'",
-                 kind == ModelKind::kUav ? "uav" : "ugv", name.c_str());
+                 kind == gazebo_sim_visualization::RobotModelKind::kUav ? "uav" : "ugv", name.c_str());
         return inserted;
     }
 
     void modelStatesCallback(const gazebo_msgs::ModelStatesConstPtr& msg) {
         for (std::size_t i = 0; i < msg->name.size() && i < msg->pose.size(); ++i) {
             const std::string& name = msg->name[i];
-            const bool configured_uav = configured_uav_models_.count(name) != 0;
-            const bool uav = configured_uav || (allow_auto_discovery_ && isUavModel(name));
-            const bool ugv = track_ugv_ && isUgvModel(name);
-            if (!uav && !ugv) {
+            const gazebo_sim_visualization::RobotModelKind kind = gazebo_sim_visualization::selectRobotModelKind(
+                name, configured_uav_models_, configured_ugv_models_, allow_auto_discovery_, track_ugv_);
+            if (kind == gazebo_sim_visualization::RobotModelKind::kNone) {
                 continue;
             }
             if (!isFinite(msg->pose[i])) {
@@ -278,7 +236,7 @@ class GazeboAutoVisualizer {
                                   name.c_str());
                 continue;
             }
-            auto it = ensureTrackedModel(name, uav ? ModelKind::kUav : ModelKind::kUgv);
+            auto it = ensureTrackedModel(name, kind);
             it->second.gazebo_pose = copyPose(msg->pose[i]);
             it->second.has_gazebo_pose = true;
         }
@@ -294,26 +252,24 @@ class GazeboAutoVisualizer {
 
     ros::Subscriber subscribeMavrosState(const std::string& name) {
         const std::string topic = modelScopedTopic(name, mavros_state_topic_suffix_, "/mavros/state");
-        return nh_.subscribe<mavros_msgs::State>(topic, 10,
-                                                 [this, name](const mavros_msgs::StateConstPtr& msg) {
-                                                     mavrosStateCallback(name, msg);
-                                                 });
+        return nh_.subscribe<mavros_msgs::State>(topic, 10, [this, name](const mavros_msgs::StateConstPtr& msg) {
+            mavrosStateCallback(name, msg);
+        });
     }
 
     ros::Subscriber subscribeUgvCmdVel(const std::string& name) {
         const std::string topic = modelScopedTopic(name, ugv_cmd_vel_topic_suffix_, "/cmd_vel");
-        return nh_.subscribe<geometry_msgs::Twist>(topic, 10,
-                                                   [this, name](const geometry_msgs::TwistConstPtr& msg) {
-                                                       ugvCmdVelCallback(name, msg);
-                                                   });
+        return nh_.subscribe<geometry_msgs::Twist>(topic, 10, [this, name](const geometry_msgs::TwistConstPtr& msg) {
+            ugvCmdVelCallback(name, msg);
+        });
     }
 
     ros::Subscriber subscribeUgvTwist(const std::string& name) {
         const std::string topic = modelScopedTopic(name, ugv_twist_topic_suffix_, "/twist");
-        return nh_.subscribe<geometry_msgs::TwistStamped>(
-            topic, 10, [this, name](const geometry_msgs::TwistStampedConstPtr& msg) {
-                ugvTwistCallback(name, msg);
-            });
+        return nh_.subscribe<geometry_msgs::TwistStamped>(topic, 10,
+                                                          [this, name](const geometry_msgs::TwistStampedConstPtr& msg) {
+                                                              ugvTwistCallback(name, msg);
+                                                          });
     }
 
     std::string modelScopedTopic(const std::string& name, const std::string& suffix,
@@ -392,14 +348,12 @@ class GazeboAutoVisualizer {
         if (!normalized_visual_frame.empty() && normalized_visual_frame.front() == '/') {
             normalized_visual_frame.erase(normalized_visual_frame.begin());
         }
-        return !normalized.empty() &&
-               (normalized == normalized_visual_frame || normalized == "world" || normalized == "map" ||
-                normalized == "odom");
+        return !normalized.empty() && (normalized == normalized_visual_frame || normalized == "world" ||
+                                       normalized == "map" || normalized == "odom");
     }
 
-    xgc2_robot_visualization::UgvVisualState makeUgvVisualState(const TrackedModel& model,
-                                                                const geometry_msgs::Pose& pose,
-                                                                const ros::Time& now) const {
+    xgc2_robot_visualization::UgvVisualState
+    makeUgvVisualState(const TrackedModel& model, const geometry_msgs::Pose& pose, const ros::Time& now) const {
         xgc2_robot_visualization::UgvVisualState state;
         state.name = model.name;
         state.pose = pose;
@@ -435,61 +389,6 @@ class GazeboAutoVisualizer {
         scene_update_pub_.publish(update);
     }
 
-    void appendSceneEntity(const TrackedModel& model, const visualization_msgs::MarkerArray& markers,
-                           std::size_t first_marker, const ros::Time& now,
-                           foxglove_msgs::SceneUpdate* update) const {
-        foxglove_msgs::SceneEntity entity;
-        entity.timestamp = now;
-        entity.frame_id = frame_id_;
-        entity.id = "xgc2/px4/" + model.name;
-        entity.lifetime = ros::Duration(0.0);
-        entity.frame_locked = false;
-
-        for (std::size_t index = first_marker; index < markers.markers.size(); ++index) {
-            const visualization_msgs::Marker& marker = markers.markers[index];
-            switch (marker.type) {
-            case visualization_msgs::Marker::MESH_RESOURCE: {
-                foxglove_msgs::ModelPrimitive primitive;
-                primitive.pose = copyPose(marker.pose);
-                primitive.scale = marker.scale;
-                primitive.color = copyColor(marker.color);
-                primitive.override_color = !marker.mesh_use_embedded_materials;
-                primitive.url = marker.mesh_resource;
-                entity.models.push_back(std::move(primitive));
-                break;
-            }
-            case visualization_msgs::Marker::LINE_STRIP: {
-                foxglove_msgs::LinePrimitive primitive;
-                primitive.type = foxglove_msgs::LinePrimitive::LINE_STRIP;
-                primitive.pose = copyPose(marker.pose);
-                primitive.thickness = marker.scale.x;
-                primitive.scale_invariant = false;
-                primitive.points = marker.points;
-                primitive.color = copyColor(marker.color);
-                entity.lines.push_back(std::move(primitive));
-                break;
-            }
-            case visualization_msgs::Marker::TEXT_VIEW_FACING: {
-                foxglove_msgs::TextPrimitive primitive;
-                primitive.pose = copyPose(marker.pose);
-                primitive.billboard = true;
-                primitive.font_size = marker.scale.z;
-                primitive.scale_invariant = false;
-                primitive.color = copyColor(marker.color);
-                primitive.text = marker.text;
-                entity.texts.push_back(std::move(primitive));
-                break;
-            }
-            default:
-                break;
-            }
-        }
-
-        if (!entity.models.empty() || !entity.lines.empty() || !entity.texts.empty()) {
-            update->entities.push_back(std::move(entity));
-        }
-    }
-
     void publishCallback(const ros::TimerEvent&) {
         const ros::Time now = ros::Time::now();
         visualization_msgs::MarkerArray markers;
@@ -501,7 +400,7 @@ class GazeboAutoVisualizer {
             if (pose == nullptr) {
                 continue;
             }
-            if (model.kind == ModelKind::kUav) {
+            if (model.kind == gazebo_sim_visualization::RobotModelKind::kUav) {
                 const std::size_t first_marker = markers.markers.size();
                 xgc2_robot_visualization::UavVisualState state;
                 state.name = model.name;
@@ -510,10 +409,16 @@ class GazeboAutoVisualizer {
                 state.stamp = now;
                 uav_visualizer_->append(state, &markers, &transforms);
                 if (publish_scene_update_) {
-                    appendSceneEntity(model, markers, first_marker, now, &scene_update);
+                    gazebo_sim_visualization::appendSceneEntity(model.kind, model.name, markers, first_marker, now,
+                                                                frame_id_, &scene_update);
                 }
             } else {
+                const std::size_t first_marker = markers.markers.size();
                 ugv_visualizer_->append(makeUgvVisualState(model, *pose, now), &markers, &transforms);
+                if (publish_scene_update_) {
+                    gazebo_sim_visualization::appendSceneEntity(model.kind, model.name, markers, first_marker, now,
+                                                                frame_id_, &scene_update);
+                }
             }
         }
 
@@ -537,6 +442,7 @@ class GazeboAutoVisualizer {
     tf2_ros::TransformBroadcaster tf_broadcaster_;
     std::map<std::string, TrackedModel> models_;
     std::set<std::string> configured_uav_models_;
+    std::set<std::string> configured_ugv_models_;
     std::unique_ptr<xgc2_robot_visualization::Fs150UavVisualizer> uav_visualizer_;
     std::unique_ptr<xgc2_robot_visualization::ScoutUgvVisualizer> ugv_visualizer_;
 
@@ -544,6 +450,7 @@ class GazeboAutoVisualizer {
     std::string model_states_topic_;
     std::string vrpn_pose_prefix_;
     std::string tracked_uav_models_csv_;
+    std::string tracked_ugv_models_csv_;
     std::string scene_update_topic_{"/xgc/scene"};
     std::string mavros_state_topic_suffix_{"/mavros/state"};
     std::string ugv_cmd_vel_topic_suffix_{"/cmd_vel"};
