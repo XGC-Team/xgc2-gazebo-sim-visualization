@@ -90,7 +90,7 @@ including `linear.y` sideways motion and yaw coupling; they are not Scout
 differential-drive wheel phases.
 
 `mecanum_mesh_scale` defaults to `0.001`, matching the millimetre-authored
-Nexus STL assets and their Gazebo SDF scale. It is deliberately separate from
+`mecanum_description` STL assets. It is deliberately separate from
 the Scout `ugv_mesh_scale` parameter.
 
 For a direct mixed RViz launch, declare each type explicitly:

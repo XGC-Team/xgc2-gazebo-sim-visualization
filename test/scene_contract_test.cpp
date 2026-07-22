@@ -51,7 +51,7 @@ TEST(SceneContract, ScoutMarkersBecomeScoutSceneEntity) {
 TEST(SceneContract, MecanumMarkersBecomeMecanumSceneEntity) {
     visualization_msgs::Marker marker;
     marker.type = visualization_msgs::Marker::MESH_RESOURCE;
-    marker.mesh_resource = "package://gazebo_sim_mecanum/models/xgc2_mecanum_ugv/meshes/nexus_base_link.STL";
+    marker.mesh_resource = "package://mecanum_description/meshes/nexus_base_link.STL";
     marker.pose.orientation.w = 1.0;
     marker.scale.x = marker.scale.y = marker.scale.z = 1.0;
     visualization_msgs::MarkerArray markers;

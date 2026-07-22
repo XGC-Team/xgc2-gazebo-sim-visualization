@@ -1,7 +1,7 @@
 schema: xgc2.product.v1
 id: xgc2-gazebo-sim-visualization
 name: XGC2 Gazebo Sim Visualization
-version: 1.1.0-14
+version: 1.1.0-15
 kind: ros1-apt
 summary: Gazebo Classic adapter for reusable XGC2 RViz and Lichtblick robot visualizers.
 ros:
@@ -25,7 +25,7 @@ apt:
   - ros-noetic-std-msgs
   - ros-noetic-tf2-ros
   - ros-noetic-visualization-msgs
-  - ros-noetic-xgc2-robot-visualization (>= 0.1.0-7)
+  - ros-noetic-xgc2-robot-visualization (>= 0.1.0-8)
 usage:
   install: 'sudo apt update
 
