@@ -38,6 +38,7 @@
           "mode": "",
           "capacity": 0,
           "namespace": "ros-node",
+          "identityNormalization": "join-tail-as-absolute-path",
           "identityParts": [
             {
               "parameter": "rosMasterPort"
@@ -181,6 +182,7 @@
           "mode": "",
           "capacity": 0,
           "namespace": "ros-node",
+          "identityNormalization": "join-tail-as-absolute-path",
           "identityParts": [
             { "parameter": "rosMasterPort" },
             { "literal": "/xgc2_lichtblick_robot_scene" }
