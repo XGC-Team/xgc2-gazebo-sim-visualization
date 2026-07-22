@@ -37,12 +37,12 @@ std::string lower(std::string value) {
     return value;
 }
 
-bool isUavModel(const std::string& name) {
+bool isFs150Model(const std::string& name) {
     static const std::regex pattern("^(uav|tello)[0-9]+$");
     return std::regex_match(name, pattern);
 }
 
-bool isUgvModel(const std::string& name) {
+bool isScoutModel(const std::string& name) {
     static const std::regex pattern("^ugv[0-9]+$");
     const std::string normalized = lower(name);
     return std::regex_match(normalized, pattern) || normalized.find("scout") != std::string::npos;
@@ -94,47 +94,63 @@ std::set<std::string> parseModelNames(const std::string& csv) {
     return names;
 }
 
-bool modelListsAreDisjoint(const std::set<std::string>& uav_models, const std::set<std::string>& ugv_models) {
-    for (const std::string& model : uav_models) {
-        if (ugv_models.count(model) != 0U) {
-            return false;
+bool modelListsAreDisjoint(const std::set<std::string>& legacy_uav_models,
+                           const std::set<std::string>& legacy_ugv_models,
+                           const std::set<std::string>& fs150_models,
+                           const std::set<std::string>& scout_models,
+                           const std::set<std::string>& mecanum_models) {
+    std::set<std::string> seen;
+    for (const std::set<std::string>* models :
+         {&legacy_uav_models, &legacy_ugv_models, &fs150_models, &scout_models, &mecanum_models}) {
+        for (const std::string& model : *models) {
+            if (!seen.insert(model).second) {
+                return false;
+            }
         }
     }
     return true;
 }
 
-RobotModelKind selectRobotModelKind(const std::string& model_name, const std::set<std::string>& configured_uav_models,
-                                    const std::set<std::string>& configured_ugv_models, bool allow_auto_discovery,
-                                    bool track_ugv) {
-    const bool configured_uav = configured_uav_models.count(model_name) != 0U;
-    const bool configured_ugv = configured_ugv_models.count(model_name) != 0U;
-    if (configured_uav && configured_ugv) {
+RobotModelKind selectRobotModelKind(const std::string& model_name, const std::set<std::string>& configured_fs150_models,
+                                    const std::set<std::string>& configured_scout_models,
+                                    const std::set<std::string>& configured_mecanum_models,
+                                    bool allow_auto_discovery, bool track_ugv) {
+    const bool configured_fs150 = configured_fs150_models.count(model_name) != 0U;
+    const bool configured_scout = configured_scout_models.count(model_name) != 0U;
+    const bool configured_mecanum = configured_mecanum_models.count(model_name) != 0U;
+    if (static_cast<int>(configured_fs150) + static_cast<int>(configured_scout) + static_cast<int>(configured_mecanum) >
+        1) {
         return RobotModelKind::kNone;
     }
-    if (configured_uav) {
-        return RobotModelKind::kUav;
+    if (configured_fs150) {
+        return RobotModelKind::kFs150;
     }
-    if (configured_ugv) {
-        return track_ugv ? RobotModelKind::kUgv : RobotModelKind::kNone;
+    if (configured_scout) {
+        return track_ugv ? RobotModelKind::kScout : RobotModelKind::kNone;
+    }
+    if (configured_mecanum) {
+        return track_ugv ? RobotModelKind::kMecanum : RobotModelKind::kNone;
     }
     if (!allow_auto_discovery) {
         return RobotModelKind::kNone;
     }
-    if (isUavModel(model_name)) {
-        return RobotModelKind::kUav;
+    if (isFs150Model(model_name)) {
+        return RobotModelKind::kFs150;
     }
-    if (track_ugv && isUgvModel(model_name)) {
-        return RobotModelKind::kUgv;
+    if (track_ugv && isScoutModel(model_name)) {
+        return RobotModelKind::kScout;
     }
     return RobotModelKind::kNone;
 }
 
 std::string sceneEntityID(RobotModelKind kind, const std::string& model_name) {
     switch (kind) {
-    case RobotModelKind::kUav:
+    case RobotModelKind::kFs150:
         return "xgc2/px4/" + model_name;
-    case RobotModelKind::kUgv:
+    case RobotModelKind::kScout:
         return "xgc2/scout/" + model_name;
+    case RobotModelKind::kMecanum:
+        return "xgc2/mecanum/" + model_name;
     case RobotModelKind::kNone:
         break;
     }

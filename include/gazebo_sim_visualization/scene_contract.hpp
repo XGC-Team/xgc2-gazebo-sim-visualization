@@ -10,7 +10,10 @@
 
 namespace gazebo_sim_visualization {
 
-enum class RobotModelKind { kNone, kUav, kUgv };
+// Each concrete vehicle family owns a rendering path. Legacy uav/ugv parameter
+// names remain aliases only; new callers must provide the concrete lists so a
+// future airframe cannot silently inherit the FS150 mesh.
+enum class RobotModelKind { kNone, kFs150, kScout, kMecanum };
 
 // SceneEntity updates replace the complete entity with the same ID. Keep the
 // high-rate robot geometry and the lower-rate path in separate entities so a
@@ -41,11 +44,16 @@ class SceneUpdateCadence {
 
 std::set<std::string> parseModelNames(const std::string& csv);
 
-bool modelListsAreDisjoint(const std::set<std::string>& uav_models, const std::set<std::string>& ugv_models);
+bool modelListsAreDisjoint(const std::set<std::string>& legacy_uav_models,
+                           const std::set<std::string>& legacy_ugv_models,
+                           const std::set<std::string>& fs150_models,
+                           const std::set<std::string>& scout_models,
+                           const std::set<std::string>& mecanum_models);
 
-RobotModelKind selectRobotModelKind(const std::string& model_name, const std::set<std::string>& configured_uav_models,
-                                    const std::set<std::string>& configured_ugv_models, bool allow_auto_discovery,
-                                    bool track_ugv);
+RobotModelKind selectRobotModelKind(const std::string& model_name, const std::set<std::string>& configured_fs150_models,
+                                    const std::set<std::string>& configured_scout_models,
+                                    const std::set<std::string>& configured_mecanum_models,
+                                    bool allow_auto_discovery, bool track_ugv);
 
 std::string sceneEntityID(RobotModelKind kind, const std::string& model_name);
 

@@ -11,6 +11,7 @@
 
 #include "gazebo_sim_visualization/scene_contract.hpp"
 #include "xgc2_robot_visualization/fs150_uav_visualizer.hpp"
+#include "xgc2_robot_visualization/mecanum_ugv_visualizer.hpp"
 #include "xgc2_robot_visualization/scout_ugv_visualizer.hpp"
 
 #include <foxglove_msgs/SceneEntityDeletion.h>
@@ -92,6 +93,9 @@ class GazeboAutoVisualizer {
         private_nh_.param<std::string>("vrpn_pose_prefix", vrpn_pose_prefix_, "/vrpn_client_node");
         private_nh_.param<std::string>("tracked_uav_models", tracked_uav_models_csv_, "");
         private_nh_.param<std::string>("tracked_ugv_models", tracked_ugv_models_csv_, "");
+        private_nh_.param<std::string>("tracked_fs150_models", tracked_fs150_models_csv_, "");
+        private_nh_.param<std::string>("tracked_scout_models", tracked_scout_models_csv_, "");
+        private_nh_.param<std::string>("tracked_mecanum_models", tracked_mecanum_models_csv_, "");
         private_nh_.param<std::string>("scene_update_topic", scene_update_topic_, "/xgc/scene");
         private_nh_.param("allow_auto_discovery", allow_auto_discovery_, true);
         private_nh_.param("track_ugv", track_ugv_, true);
@@ -117,6 +121,7 @@ class GazeboAutoVisualizer {
         private_nh_.param("rotor_speed_rad_s", rotor_speed_rad_s_, 70.0);
         private_nh_.param("uav_mesh_scale", uav_mesh_scale_, 1.0);
         private_nh_.param("ugv_mesh_scale", ugv_mesh_scale_, 1.0);
+        private_nh_.param("mecanum_mesh_scale", mecanum_mesh_scale_, 0.001);
 
         publish_rate_ = std::max(1.0, publish_rate_);
         scene_publish_rate_ = std::min(publish_rate_, std::max(1.0, scene_publish_rate_));
@@ -153,16 +158,35 @@ class GazeboAutoVisualizer {
         ugv_config.max_visual_wheel_speed_rad_s = ugv_max_visual_wheel_speed_rad_s_;
         ugv_visualizer_.reset(new xgc2_robot_visualization::ScoutUgvVisualizer(ugv_config));
 
-        configured_uav_models_ = gazebo_sim_visualization::parseModelNames(tracked_uav_models_csv_);
-        configured_ugv_models_ = gazebo_sim_visualization::parseModelNames(tracked_ugv_models_csv_);
-        if (!gazebo_sim_visualization::modelListsAreDisjoint(configured_uav_models_, configured_ugv_models_)) {
-            throw std::runtime_error("tracked UAV and UGV model lists must be disjoint");
+        xgc2_robot_visualization::MecanumUgvVisualizer::Config mecanum_config;
+        mecanum_config.frame_id = frame_id_;
+        mecanum_config.mesh_scale = mecanum_mesh_scale_;
+        mecanum_config.path_publish_rate = path_publish_rate_;
+        mecanum_config.path_limit = path_limit_;
+        mecanum_visualizer_.reset(new xgc2_robot_visualization::MecanumUgvVisualizer(mecanum_config));
+
+        const std::set<std::string> legacy_uav_models =
+            gazebo_sim_visualization::parseModelNames(tracked_uav_models_csv_);
+        const std::set<std::string> legacy_ugv_models =
+            gazebo_sim_visualization::parseModelNames(tracked_ugv_models_csv_);
+        configured_fs150_models_ = gazebo_sim_visualization::parseModelNames(tracked_fs150_models_csv_);
+        configured_scout_models_ = gazebo_sim_visualization::parseModelNames(tracked_scout_models_csv_);
+        configured_mecanum_models_ = gazebo_sim_visualization::parseModelNames(tracked_mecanum_models_csv_);
+        if (!gazebo_sim_visualization::modelListsAreDisjoint(
+                legacy_uav_models, legacy_ugv_models, configured_fs150_models_, configured_scout_models_,
+                configured_mecanum_models_)) {
+            throw std::runtime_error("tracked FS150, Scout, and Mecanum model lists (including legacy aliases) must be disjoint");
         }
-        for (const std::string& name : configured_uav_models_) {
-            ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kUav);
+        configured_fs150_models_.insert(legacy_uav_models.begin(), legacy_uav_models.end());
+        configured_scout_models_.insert(legacy_ugv_models.begin(), legacy_ugv_models.end());
+        for (const std::string& name : configured_fs150_models_) {
+            ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kFs150);
         }
-        for (const std::string& name : configured_ugv_models_) {
-            ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kUgv);
+        for (const std::string& name : configured_scout_models_) {
+            ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kScout);
+        }
+        for (const std::string& name : configured_mecanum_models_) {
+            ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kMecanum);
         }
 
         if (publish_markers_) {
@@ -215,15 +239,20 @@ class GazeboAutoVisualizer {
         model.name = name;
         model.kind = kind;
         model.vrpn_subscriber = subscribeVrpn(name);
-        if (kind == gazebo_sim_visualization::RobotModelKind::kUav) {
+        if (kind == gazebo_sim_visualization::RobotModelKind::kFs150) {
             model.mavros_state_subscriber = subscribeMavrosState(name);
         } else {
             model.cmd_vel_subscriber = subscribeUgvCmdVel(name);
             model.twist_subscriber = subscribeUgvTwist(name);
         }
         auto inserted = models_.emplace(name, std::move(model)).first;
-        ROS_INFO("[gazebo_auto_visualizer] Tracking %s model '%s'",
-                 kind == gazebo_sim_visualization::RobotModelKind::kUav ? "uav" : "ugv", name.c_str());
+        const char* kind_name = "scout";
+        if (kind == gazebo_sim_visualization::RobotModelKind::kFs150) {
+            kind_name = "fs150";
+        } else if (kind == gazebo_sim_visualization::RobotModelKind::kMecanum) {
+            kind_name = "mecanum";
+        }
+        ROS_INFO("[gazebo_auto_visualizer] Tracking %s model '%s'", kind_name, name.c_str());
         return inserted;
     }
 
@@ -231,7 +260,8 @@ class GazeboAutoVisualizer {
         for (std::size_t i = 0; i < msg->name.size() && i < msg->pose.size(); ++i) {
             const std::string& name = msg->name[i];
             const gazebo_sim_visualization::RobotModelKind kind = gazebo_sim_visualization::selectRobotModelKind(
-                name, configured_uav_models_, configured_ugv_models_, allow_auto_discovery_, track_ugv_);
+                name, configured_fs150_models_, configured_scout_models_, configured_mecanum_models_, allow_auto_discovery_,
+                track_ugv_);
             if (kind == gazebo_sim_visualization::RobotModelKind::kNone) {
                 continue;
             }
@@ -386,6 +416,38 @@ class GazeboAutoVisualizer {
         return state;
     }
 
+    xgc2_robot_visualization::MecanumVisualState
+    makeMecanumVisualState(const TrackedModel& model, const geometry_msgs::Pose& pose, const ros::Time& now) const {
+        xgc2_robot_visualization::MecanumVisualState state;
+        state.name = model.name;
+        state.pose = pose;
+        state.stamp = now;
+
+        if (model.has_twist && isFresh(model.twist_stamp, now, ugv_motion_timeout_sec_)) {
+            state.has_motion_hint = true;
+            state.yaw_rate_rad_s = model.twist.twist.angular.z;
+            if (twistFrameIsWorldFixed(model.twist.header.frame_id)) {
+                const double yaw = yawFromQuaternion(pose.orientation);
+                state.forward_velocity_m_s =
+                    model.twist.twist.linear.x * std::cos(yaw) + model.twist.twist.linear.y * std::sin(yaw);
+                state.lateral_velocity_m_s =
+                    -model.twist.twist.linear.x * std::sin(yaw) + model.twist.twist.linear.y * std::cos(yaw);
+            } else {
+                state.forward_velocity_m_s = model.twist.twist.linear.x;
+                state.lateral_velocity_m_s = model.twist.twist.linear.y;
+            }
+            return state;
+        }
+
+        if (model.has_cmd_vel && isFresh(model.cmd_vel_stamp, now, ugv_motion_timeout_sec_)) {
+            state.has_motion_hint = true;
+            state.forward_velocity_m_s = model.cmd_vel.linear.x;
+            state.lateral_velocity_m_s = model.cmd_vel.linear.y;
+            state.yaw_rate_rad_s = model.cmd_vel.angular.z;
+        }
+        return state;
+    }
+
     void publishSceneReset() {
         foxglove_msgs::SceneUpdate update;
         foxglove_msgs::SceneEntityDeletion deletion;
@@ -415,37 +477,28 @@ class GazeboAutoVisualizer {
             if (pose == nullptr) {
                 continue;
             }
-            if (model.kind == gazebo_sim_visualization::RobotModelKind::kUav) {
-                const std::size_t first_marker = markers.markers.size();
+            const std::size_t first_marker = markers.markers.size();
+            if (model.kind == gazebo_sim_visualization::RobotModelKind::kFs150) {
                 xgc2_robot_visualization::UavVisualState state;
                 state.name = model.name;
                 state.pose = *pose;
                 state.rotors_active = rotorsActive(model, now);
                 state.stamp = now;
                 uav_visualizer_->append(state, &markers, &transforms);
-                if (scene_decision.publish_robot) {
-                    gazebo_sim_visualization::appendSceneEntityPart(
-                        model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kRobot, markers,
-                        first_marker, now, frame_id_, &scene_update);
-                }
-                if (scene_decision.publish_path) {
-                    gazebo_sim_visualization::appendSceneEntityPart(
-                        model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
-                        now, frame_id_, &scene_update);
-                }
+            } else if (model.kind == gazebo_sim_visualization::RobotModelKind::kMecanum) {
+                mecanum_visualizer_->append(makeMecanumVisualState(model, *pose, now), &markers, &transforms);
             } else {
-                const std::size_t first_marker = markers.markers.size();
                 ugv_visualizer_->append(makeUgvVisualState(model, *pose, now), &markers, &transforms);
-                if (scene_decision.publish_robot) {
-                    gazebo_sim_visualization::appendSceneEntityPart(
-                        model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kRobot, markers,
-                        first_marker, now, frame_id_, &scene_update);
-                }
-                if (scene_decision.publish_path) {
-                    gazebo_sim_visualization::appendSceneEntityPart(
-                        model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
-                        now, frame_id_, &scene_update);
-                }
+            }
+            if (scene_decision.publish_robot) {
+                gazebo_sim_visualization::appendSceneEntityPart(
+                    model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kRobot, markers, first_marker,
+                    now, frame_id_, &scene_update);
+            }
+            if (scene_decision.publish_path) {
+                gazebo_sim_visualization::appendSceneEntityPart(
+                    model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
+                    now, frame_id_, &scene_update);
             }
         }
 
@@ -468,10 +521,12 @@ class GazeboAutoVisualizer {
     ros::Timer publish_timer_;
     tf2_ros::TransformBroadcaster tf_broadcaster_;
     std::map<std::string, TrackedModel> models_;
-    std::set<std::string> configured_uav_models_;
-    std::set<std::string> configured_ugv_models_;
+    std::set<std::string> configured_fs150_models_;
+    std::set<std::string> configured_scout_models_;
+    std::set<std::string> configured_mecanum_models_;
     std::unique_ptr<xgc2_robot_visualization::Fs150UavVisualizer> uav_visualizer_;
     std::unique_ptr<xgc2_robot_visualization::ScoutUgvVisualizer> ugv_visualizer_;
+    std::unique_ptr<xgc2_robot_visualization::MecanumUgvVisualizer> mecanum_visualizer_;
     std::unique_ptr<gazebo_sim_visualization::SceneUpdateCadence> scene_update_cadence_;
 
     std::string frame_id_;
@@ -479,6 +534,9 @@ class GazeboAutoVisualizer {
     std::string vrpn_pose_prefix_;
     std::string tracked_uav_models_csv_;
     std::string tracked_ugv_models_csv_;
+    std::string tracked_fs150_models_csv_;
+    std::string tracked_scout_models_csv_;
+    std::string tracked_mecanum_models_csv_;
     std::string scene_update_topic_{"/xgc/scene"};
     std::string mavros_state_topic_suffix_{"/mavros/state"};
     std::string ugv_cmd_vel_topic_suffix_{"/cmd_vel"};
@@ -495,6 +553,7 @@ class GazeboAutoVisualizer {
     double rotor_speed_rad_s_{70.0};
     double uav_mesh_scale_{1.0};
     double ugv_mesh_scale_{1.0};
+    double mecanum_mesh_scale_{0.001};
     double ugv_visual_wheel_radius_{0.08};
     double ugv_visual_track_width_{0.416};
     double ugv_wheel_motion_deadband_{0.02};

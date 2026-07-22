@@ -12,19 +12,21 @@ namespace gazebo_sim_visualization {
 namespace {
 
 TEST(SceneContract, ImmutableListsSelectOnlyConfiguredModels) {
-    const std::set<std::string> uavs{"uav1", "uav2"};
-    const std::set<std::string> ugvs{"ugv1"};
+    const std::set<std::string> fs150s{"uav1", "uav2"};
+    const std::set<std::string> scouts{"ugv1"};
+    const std::set<std::string> mecanums{"ugv2"};
 
-    EXPECT_EQ(selectRobotModelKind("uav1", uavs, ugvs, false, true), RobotModelKind::kUav);
-    EXPECT_EQ(selectRobotModelKind("ugv1", uavs, ugvs, false, true), RobotModelKind::kUgv);
-    EXPECT_EQ(selectRobotModelKind("uav9", uavs, ugvs, false, true), RobotModelKind::kNone);
-    EXPECT_EQ(selectRobotModelKind("ugv9", uavs, ugvs, false, true), RobotModelKind::kNone);
-    EXPECT_EQ(selectRobotModelKind("ground_plane", uavs, ugvs, false, true), RobotModelKind::kNone);
+    EXPECT_EQ(selectRobotModelKind("uav1", fs150s, scouts, mecanums, false, true), RobotModelKind::kFs150);
+    EXPECT_EQ(selectRobotModelKind("ugv1", fs150s, scouts, mecanums, false, true), RobotModelKind::kScout);
+    EXPECT_EQ(selectRobotModelKind("ugv2", fs150s, scouts, mecanums, false, true), RobotModelKind::kMecanum);
+    EXPECT_EQ(selectRobotModelKind("uav9", fs150s, scouts, mecanums, false, true), RobotModelKind::kNone);
+    EXPECT_EQ(selectRobotModelKind("ugv9", fs150s, scouts, mecanums, false, true), RobotModelKind::kNone);
+    EXPECT_EQ(selectRobotModelKind("ground_plane", fs150s, scouts, mecanums, false, true), RobotModelKind::kNone);
 }
 
 TEST(SceneContract, ModelListsMustBeDisjoint) {
-    EXPECT_TRUE(modelListsAreDisjoint({"uav1"}, {"ugv1"}));
-    EXPECT_FALSE(modelListsAreDisjoint({"uav1", "shared"}, {"shared", "ugv1"}));
+    EXPECT_TRUE(modelListsAreDisjoint({}, {}, {"uav1"}, {"ugv1"}, {"ugv2"}));
+    EXPECT_FALSE(modelListsAreDisjoint({"shared"}, {}, {"uav1"}, {"ugv1"}, {"shared"}));
 }
 
 TEST(SceneContract, ScoutMarkersBecomeScoutSceneEntity) {
@@ -37,11 +39,29 @@ TEST(SceneContract, ScoutMarkersBecomeScoutSceneEntity) {
     markers.markers.push_back(marker);
 
     foxglove_msgs::SceneUpdate update;
-    appendSceneEntity(RobotModelKind::kUgv, "ugv1", markers, 0U, ros::Time(42, 0), "world", &update);
+    appendSceneEntity(RobotModelKind::kScout, "ugv1", markers, 0U, ros::Time(42, 0), "world", &update);
 
     ASSERT_EQ(update.entities.size(), 1U);
     EXPECT_EQ(update.entities[0].id, "xgc2/scout/ugv1");
     EXPECT_EQ(update.entities[0].frame_id, "world");
+    ASSERT_EQ(update.entities[0].models.size(), 1U);
+    EXPECT_EQ(update.entities[0].models[0].url, marker.mesh_resource);
+}
+
+TEST(SceneContract, MecanumMarkersBecomeMecanumSceneEntity) {
+    visualization_msgs::Marker marker;
+    marker.type = visualization_msgs::Marker::MESH_RESOURCE;
+    marker.mesh_resource = "package://gazebo_sim_mecanum/models/xgc2_mecanum_ugv/meshes/nexus_base_link.STL";
+    marker.pose.orientation.w = 1.0;
+    marker.scale.x = marker.scale.y = marker.scale.z = 1.0;
+    visualization_msgs::MarkerArray markers;
+    markers.markers.push_back(marker);
+
+    foxglove_msgs::SceneUpdate update;
+    appendSceneEntity(RobotModelKind::kMecanum, "ugv1", markers, 0U, ros::Time(42, 0), "world", &update);
+
+    ASSERT_EQ(update.entities.size(), 1U);
+    EXPECT_EQ(update.entities[0].id, "xgc2/mecanum/ugv1");
     ASSERT_EQ(update.entities[0].models.size(), 1U);
     EXPECT_EQ(update.entities[0].models[0].url, marker.mesh_resource);
 }
@@ -74,7 +94,7 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
     markers.markers = {mesh, path, label};
 
     foxglove_msgs::SceneUpdate robot_update;
-    appendSceneEntityPart(RobotModelKind::kUav, "uav1", SceneEntityPart::kRobot, markers, 0U, ros::Time(42, 0), "world",
+    appendSceneEntityPart(RobotModelKind::kFs150, "uav1", SceneEntityPart::kRobot, markers, 0U, ros::Time(42, 0), "world",
                           &robot_update);
     ASSERT_EQ(robot_update.entities.size(), 1U);
     EXPECT_EQ(robot_update.entities[0].id, "xgc2/px4/uav1");
@@ -84,7 +104,7 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
     EXPECT_TRUE(robot_update.entities[0].lifetime.isZero());
 
     foxglove_msgs::SceneUpdate path_update;
-    appendSceneEntityPart(RobotModelKind::kUav, "uav1", SceneEntityPart::kPath, markers, 0U, ros::Time(42, 0), "world",
+    appendSceneEntityPart(RobotModelKind::kFs150, "uav1", SceneEntityPart::kPath, markers, 0U, ros::Time(42, 0), "world",
                           &path_update);
     ASSERT_EQ(path_update.entities.size(), 1U);
     EXPECT_EQ(path_update.entities[0].id, "xgc2/px4/uav1/path");
@@ -94,7 +114,7 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
     EXPECT_TRUE(path_update.entities[0].lifetime.isZero());
 
     foxglove_msgs::SceneUpdate legacy_full_update;
-    appendSceneEntity(RobotModelKind::kUav, "uav1", markers, 0U, ros::Time(42, 0), "world", &legacy_full_update);
+    appendSceneEntity(RobotModelKind::kFs150, "uav1", markers, 0U, ros::Time(42, 0), "world", &legacy_full_update);
     EXPECT_LT(ros::serialization::serializationLength(robot_update),
               ros::serialization::serializationLength(legacy_full_update));
 }
@@ -132,7 +152,7 @@ TEST(SceneContract, MixedFleetSceneSerializationBudgetIsBounded) {
 
     for (int robot_index = 1; robot_index <= 10; ++robot_index) {
         const bool is_uav = robot_index <= 6;
-        const RobotModelKind kind = is_uav ? RobotModelKind::kUav : RobotModelKind::kUgv;
+        const RobotModelKind kind = is_uav ? RobotModelKind::kFs150 : RobotModelKind::kScout;
         const std::string name = is_uav ? "uav" + std::to_string(robot_index) : "ugv" + std::to_string(robot_index - 6);
         const int model_count = is_uav ? 5 : 6;
         visualization_msgs::MarkerArray markers;
@@ -192,10 +212,13 @@ TEST(SceneContract, MixedFleetSceneSerializationBudgetIsBounded) {
 }
 
 TEST(SceneContract, EntityIDsRemainKindScoped) {
-    EXPECT_EQ(sceneEntityID(RobotModelKind::kUav, "uav1"), "xgc2/px4/uav1");
-    EXPECT_EQ(sceneEntityID(RobotModelKind::kUgv, "ugv1"), "xgc2/scout/ugv1");
-    EXPECT_EQ(sceneEntityPartID(RobotModelKind::kUav, "uav1", SceneEntityPart::kPath), "xgc2/px4/uav1/path");
-    EXPECT_EQ(sceneEntityPartID(RobotModelKind::kUgv, "ugv1", SceneEntityPart::kPath), "xgc2/scout/ugv1/path");
+    EXPECT_EQ(sceneEntityID(RobotModelKind::kFs150, "uav1"), "xgc2/px4/uav1");
+    EXPECT_EQ(sceneEntityID(RobotModelKind::kScout, "ugv1"), "xgc2/scout/ugv1");
+    EXPECT_EQ(sceneEntityID(RobotModelKind::kMecanum, "ugv1"), "xgc2/mecanum/ugv1");
+    EXPECT_EQ(sceneEntityPartID(RobotModelKind::kFs150, "uav1", SceneEntityPart::kPath), "xgc2/px4/uav1/path");
+    EXPECT_EQ(sceneEntityPartID(RobotModelKind::kScout, "ugv1", SceneEntityPart::kPath), "xgc2/scout/ugv1/path");
+    EXPECT_EQ(sceneEntityPartID(RobotModelKind::kMecanum, "ugv1", SceneEntityPart::kPath),
+              "xgc2/mecanum/ugv1/path");
     EXPECT_THROW(sceneEntityID(RobotModelKind::kNone, "unknown"), std::invalid_argument);
 }
 
