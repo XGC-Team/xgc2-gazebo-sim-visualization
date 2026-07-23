@@ -80,8 +80,9 @@ docker run --rm \
       ros-noetic-sensor-msgs \
       ros-noetic-std-msgs \
       ros-noetic-tf2-ros \
-      ros-noetic-visualization-msgs \
-      ros-noetic-xgc2-robot-visualization
+      ros-noetic-visualization-msgs
+
+    /workspace/repo/.xgc2/scripts/install_robot_visualization_dependency.sh
 
     rm -rf /workspace/work/src /workspace/work/build /workspace/work/devel /workspace/work/install-root
     mkdir -p /workspace/work/src/xgc2-gazebo-sim-visualization

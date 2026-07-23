@@ -6,6 +6,10 @@ This repository contains the `gazebo_sim_visualization` package. It discovers
 Gazebo models and adapts Gazebo/MAVROS topics into reusable robot visualizers
 from `xgc2_robot_visualization`.
 
+The Mecanum renderer is a required build dependency. Standalone CI builds its
+immutable capability source when production APT has not caught up; release
+trains instead consume the exact staged APT candidate.
+
 ## Build
 
 ```bash
