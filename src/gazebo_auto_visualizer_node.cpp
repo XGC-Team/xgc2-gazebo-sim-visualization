@@ -97,6 +97,10 @@ class GazeboAutoVisualizer {
         private_nh_.param<std::string>("tracked_scout_models", tracked_scout_models_csv_, "");
         private_nh_.param<std::string>("tracked_mecanum_models", tracked_mecanum_models_csv_, "");
         private_nh_.param<std::string>("scene_update_topic", scene_update_topic_, "/xgc/scene");
+        if (!private_nh_.getParam("marker_color", marker_color_)) {
+            throw std::runtime_error("marker_color is required");
+        }
+        scene_label_style_ = gazebo_sim_visualization::sceneLabelStyleFromMarkerColor(marker_color_);
         private_nh_.param("allow_auto_discovery", allow_auto_discovery_, true);
         private_nh_.param("track_ugv", track_ugv_, true);
         private_nh_.param("publish_markers", publish_markers_, true);
@@ -493,12 +497,12 @@ class GazeboAutoVisualizer {
             if (scene_decision.publish_robot) {
                 gazebo_sim_visualization::appendSceneEntityPart(
                     model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kRobot, markers, first_marker,
-                    now, frame_id_, &scene_update);
+                    now, frame_id_, scene_label_style_, &scene_update);
             }
             if (scene_decision.publish_path) {
                 gazebo_sim_visualization::appendSceneEntityPart(
                     model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
-                    now, frame_id_, &scene_update);
+                    now, frame_id_, scene_label_style_, &scene_update);
             }
         }
 
@@ -528,6 +532,7 @@ class GazeboAutoVisualizer {
     std::unique_ptr<xgc2_robot_visualization::ScoutUgvVisualizer> ugv_visualizer_;
     std::unique_ptr<xgc2_robot_visualization::MecanumUgvVisualizer> mecanum_visualizer_;
     std::unique_ptr<gazebo_sim_visualization::SceneUpdateCadence> scene_update_cadence_;
+    gazebo_sim_visualization::SceneLabelStyle scene_label_style_;
 
     std::string frame_id_;
     std::string model_states_topic_;
@@ -537,6 +542,7 @@ class GazeboAutoVisualizer {
     std::string tracked_fs150_models_csv_;
     std::string tracked_scout_models_csv_;
     std::string tracked_mecanum_models_csv_;
+    std::string marker_color_;
     std::string scene_update_topic_{"/xgc/scene"};
     std::string mavros_state_topic_suffix_{"/mavros/state"};
     std::string ugv_cmd_vel_topic_suffix_{"/cmd_vel"};

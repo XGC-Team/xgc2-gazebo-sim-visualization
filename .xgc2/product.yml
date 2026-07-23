@@ -33,7 +33,7 @@ usage:
 
     '
   smoke_test: 'roslaunch --files gazebo_sim_visualization gazebo_auto_visualization_rviz.launch
-    rviz:=false
+    rviz:=false marker_color:=#000000
 
     '
 ownership:
@@ -44,4 +44,4 @@ release:
   dependency_policy:
     xgc2-robot-visualization: rebuild
   apt_versions:
-    focal: 1.1.0-20
+    focal: 1.1.0-19

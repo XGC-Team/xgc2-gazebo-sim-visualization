@@ -79,7 +79,39 @@ foxglove_msgs::Color copyColor(const std_msgs::ColorRGBA& source) {
     return result;
 }
 
+int hexDigit(char value) {
+    if (value >= '0' && value <= '9') {
+        return value - '0';
+    }
+    if (value >= 'a' && value <= 'f') {
+        return value - 'a' + 10;
+    }
+    return -1;
+}
+
+double hexChannel(const std::string& value, std::size_t offset) {
+    const int high = hexDigit(value[offset]);
+    const int low = hexDigit(value[offset + 1U]);
+    if (high < 0 || low < 0) {
+        throw std::invalid_argument("marker color must use canonical lowercase #rrggbb syntax");
+    }
+    return static_cast<double>(high * 16 + low) / 255.0;
+}
+
 } // namespace
+
+SceneLabelStyle sceneLabelStyleFromMarkerColor(const std::string& marker_color) {
+    if (marker_color.size() != 7U || marker_color.front() != '#') {
+        throw std::invalid_argument("marker color must use canonical lowercase #rrggbb syntax");
+    }
+    SceneLabelStyle style;
+    style.font_size = 0.24;
+    style.color.r = hexChannel(marker_color, 1U);
+    style.color.g = hexChannel(marker_color, 3U);
+    style.color.b = hexChannel(marker_color, 5U);
+    style.color.a = 1.0;
+    return style;
+}
 
 std::set<std::string> parseModelNames(const std::string& csv) {
     std::set<std::string> names;
@@ -212,7 +244,7 @@ bool markerBelongsToPart(const visualization_msgs::Marker& marker, SceneEntityPa
 void appendSceneEntityImpl(RobotModelKind kind, const std::string& entity_id,
                            const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
                            const ros::Time& timestamp, const std::string& frame_id, const SceneEntityPart* part,
-                           foxglove_msgs::SceneUpdate* update) {
+                           const SceneLabelStyle& label_style, foxglove_msgs::SceneUpdate* update) {
     if (update == nullptr || first_marker > markers.markers.size()) {
         throw std::invalid_argument("scene entity output and marker range must be valid");
     }
@@ -257,9 +289,9 @@ void appendSceneEntityImpl(RobotModelKind kind, const std::string& entity_id,
             foxglove_msgs::TextPrimitive primitive;
             primitive.pose = copyPose(marker.pose);
             primitive.billboard = true;
-            primitive.font_size = marker.scale.z;
+            primitive.font_size = label_style.font_size;
             primitive.scale_invariant = false;
-            primitive.color = copyColor(marker.color);
+            primitive.color = label_style.color;
             primitive.text = marker.text;
             entity.texts.push_back(std::move(primitive));
             break;
@@ -278,17 +310,18 @@ void appendSceneEntityImpl(RobotModelKind kind, const std::string& entity_id,
 
 void appendSceneEntity(RobotModelKind kind, const std::string& model_name,
                        const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
-                       const ros::Time& timestamp, const std::string& frame_id, foxglove_msgs::SceneUpdate* update) {
+                       const ros::Time& timestamp, const std::string& frame_id, const SceneLabelStyle& label_style,
+                       foxglove_msgs::SceneUpdate* update) {
     appendSceneEntityImpl(kind, sceneEntityID(kind, model_name), markers, first_marker, timestamp, frame_id, nullptr,
-                          update);
+                          label_style, update);
 }
 
 void appendSceneEntityPart(RobotModelKind kind, const std::string& model_name, SceneEntityPart part,
                            const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
                            const ros::Time& timestamp, const std::string& frame_id,
-                           foxglove_msgs::SceneUpdate* update) {
+                           const SceneLabelStyle& label_style, foxglove_msgs::SceneUpdate* update) {
     appendSceneEntityImpl(kind, sceneEntityPartID(kind, model_name, part), markers, first_marker, timestamp, frame_id,
-                          &part, update);
+                          &part, label_style, update);
 }
 
 } // namespace gazebo_sim_visualization

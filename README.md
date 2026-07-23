@@ -20,7 +20,8 @@ catkin_make
 ## Launch
 
 ```bash
-roslaunch gazebo_sim_visualization gazebo_auto_visualization_rviz.launch
+roslaunch gazebo_sim_visualization gazebo_auto_visualization_rviz.launch \
+  marker_color:=#000000
 ```
 
 ## UAV rotor state
@@ -53,6 +54,7 @@ immutable Swarm Asset snapshot. The relevant node parameters are:
 - `tracked_fs150_models`: comma-separated FS150 Gazebo/VRPN model names.
 - `tracked_scout_models`: comma-separated Scout Gazebo/VRPN model names.
 - `tracked_mecanum_models`: comma-separated Mecanum Gazebo/VRPN model names.
+- `marker_color`: required canonical lowercase `#rrggbb` color shared by every robot label.
 - `allow_auto_discovery`: may be disabled so only robots declared by the run snapshot appear.
 - `publish_markers` and `publish_transforms`: may be disabled for the dedicated Lichtblick publisher.
 
@@ -104,5 +106,6 @@ roslaunch gazebo_sim_visualization gazebo_auto_visualization_rviz.launch \
   tracked_fs150_models:=uav1 \
   tracked_scout_models:=ugv1 \
   tracked_mecanum_models:=ugv2 \
+  marker_color:=#000000 \
   allow_auto_discovery:=false
 ```

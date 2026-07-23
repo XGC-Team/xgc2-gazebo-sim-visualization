@@ -63,7 +63,10 @@ install(DIRECTORY launch rviz
 
 if(CATKIN_ENABLE_TESTING)
   find_package(roslaunch REQUIRED)
-  roslaunch_add_file_check(launch/gazebo_auto_visualization_rviz.launch)
+  # roslaunch_add_file_check embeds argument text in its CMake target name, where
+  # '#' is illegal. This value only satisfies required-argument XML validation;
+  # the node's strict canonical #rrggbb parser is covered by scene_contract_test.
+  roslaunch_add_file_check(launch/gazebo_auto_visualization_rviz.launch "marker_color:=000000")
   catkin_add_gtest(scene_contract_test test/scene_contract_test.cpp)
   if(TARGET scene_contract_test)
     target_link_libraries(scene_contract_test gazebo_scene_contract ${catkin_LIBRARIES})

@@ -7,6 +7,7 @@
   <arg name="tracked_fs150_models" default=""/>
   <arg name="tracked_scout_models" default=""/>
   <arg name="tracked_mecanum_models" default=""/>
+  <arg name="marker_color"/>
   <arg name="allow_auto_discovery" default="true"/>
   <arg name="track_ugv" default="true"/>
   <arg name="publish_markers" default="true"/>
@@ -48,6 +49,7 @@
       <param name="tracked_fs150_models" value="$(arg tracked_fs150_models)"/>
       <param name="tracked_scout_models" value="$(arg tracked_scout_models)"/>
       <param name="tracked_mecanum_models" value="$(arg tracked_mecanum_models)"/>
+      <param name="marker_color" value="$(arg marker_color)"/>
       <param name="allow_auto_discovery" value="$(arg allow_auto_discovery)"/>
       <param name="track_ugv" value="$(arg track_ugv)"/>
       <param name="publish_markers" value="$(arg publish_markers)"/>

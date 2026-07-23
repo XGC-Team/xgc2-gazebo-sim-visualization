@@ -11,6 +11,64 @@
 namespace gazebo_sim_visualization {
 namespace {
 
+SceneLabelStyle blackLabelStyle() {
+    return sceneLabelStyleFromMarkerColor("#000000");
+}
+
+TEST(SceneContract, MarkerColorIsStrictAndProducesOpaqueTextWithUnifiedFontSize) {
+    const SceneLabelStyle black = blackLabelStyle();
+    EXPECT_DOUBLE_EQ(black.font_size, 0.24);
+    EXPECT_DOUBLE_EQ(black.color.r, 0.0);
+    EXPECT_DOUBLE_EQ(black.color.g, 0.0);
+    EXPECT_DOUBLE_EQ(black.color.b, 0.0);
+    EXPECT_DOUBLE_EQ(black.color.a, 1.0);
+
+    const SceneLabelStyle custom = sceneLabelStyleFromMarkerColor("#1a2b3c");
+    EXPECT_NEAR(custom.color.r, 26.0 / 255.0, 1.0e-12);
+    EXPECT_NEAR(custom.color.g, 43.0 / 255.0, 1.0e-12);
+    EXPECT_NEAR(custom.color.b, 60.0 / 255.0, 1.0e-12);
+    EXPECT_THROW(sceneLabelStyleFromMarkerColor("000000"), std::invalid_argument);
+    EXPECT_THROW(sceneLabelStyleFromMarkerColor("#FFFFFF"), std::invalid_argument);
+    EXPECT_THROW(sceneLabelStyleFromMarkerColor("#00000000"), std::invalid_argument);
+}
+
+TEST(SceneContract, FS150ScoutAndMecanumLabelsUseOneSceneStyle) {
+    const RobotModelKind kinds[] = {
+        RobotModelKind::kFs150,
+        RobotModelKind::kScout,
+        RobotModelKind::kMecanum,
+    };
+    const char* names[] = {"uav1", "ugv1", "mecanum1"};
+    const SceneLabelStyle style = sceneLabelStyleFromMarkerColor("#102030");
+
+    for (std::size_t index = 0U; index < 3U; ++index) {
+        visualization_msgs::Marker label;
+        label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+        label.pose.orientation.w = 1.0;
+        label.scale.z = index == 2U ? 0.18 : 0.32;
+        label.color.r = 1.0;
+        label.color.g = index == 2U ? 0.85 : 1.0;
+        label.color.b = index == 2U ? 0.25 : 1.0;
+        label.color.a = 1.0;
+        label.text = names[index];
+        visualization_msgs::MarkerArray markers;
+        markers.markers.push_back(label);
+
+        foxglove_msgs::SceneUpdate update;
+        appendSceneEntity(kinds[index], names[index], markers, 0U, ros::Time(42, 0), "world", style, &update);
+        ASSERT_EQ(update.entities.size(), 1U);
+        ASSERT_EQ(update.entities[0].texts.size(), 1U);
+        const foxglove_msgs::TextPrimitive& text = update.entities[0].texts[0];
+        EXPECT_DOUBLE_EQ(text.font_size, 0.24);
+        EXPECT_DOUBLE_EQ(text.color.r, 16.0 / 255.0);
+        EXPECT_DOUBLE_EQ(text.color.g, 32.0 / 255.0);
+        EXPECT_DOUBLE_EQ(text.color.b, 48.0 / 255.0);
+        EXPECT_DOUBLE_EQ(text.color.a, 1.0);
+        EXPECT_TRUE(text.billboard);
+        EXPECT_FALSE(text.scale_invariant);
+    }
+}
+
 TEST(SceneContract, ImmutableListsSelectOnlyConfiguredModels) {
     const std::set<std::string> fs150s{"uav1", "uav2"};
     const std::set<std::string> scouts{"ugv1"};
@@ -39,7 +97,8 @@ TEST(SceneContract, ScoutMarkersBecomeScoutSceneEntity) {
     markers.markers.push_back(marker);
 
     foxglove_msgs::SceneUpdate update;
-    appendSceneEntity(RobotModelKind::kScout, "ugv1", markers, 0U, ros::Time(42, 0), "world", &update);
+    appendSceneEntity(RobotModelKind::kScout, "ugv1", markers, 0U, ros::Time(42, 0), "world", blackLabelStyle(),
+                      &update);
 
     ASSERT_EQ(update.entities.size(), 1U);
     EXPECT_EQ(update.entities[0].id, "xgc2/scout/ugv1");
@@ -58,7 +117,8 @@ TEST(SceneContract, MecanumMarkersBecomeMecanumSceneEntity) {
     markers.markers.push_back(marker);
 
     foxglove_msgs::SceneUpdate update;
-    appendSceneEntity(RobotModelKind::kMecanum, "ugv1", markers, 0U, ros::Time(42, 0), "world", &update);
+    appendSceneEntity(RobotModelKind::kMecanum, "ugv1", markers, 0U, ros::Time(42, 0), "world", blackLabelStyle(),
+                      &update);
 
     ASSERT_EQ(update.entities.size(), 1U);
     EXPECT_EQ(update.entities[0].id, "xgc2/mecanum/ugv1");
@@ -95,7 +155,7 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
 
     foxglove_msgs::SceneUpdate robot_update;
     appendSceneEntityPart(RobotModelKind::kFs150, "uav1", SceneEntityPart::kRobot, markers, 0U, ros::Time(42, 0), "world",
-                          &robot_update);
+                          blackLabelStyle(), &robot_update);
     ASSERT_EQ(robot_update.entities.size(), 1U);
     EXPECT_EQ(robot_update.entities[0].id, "xgc2/px4/uav1");
     EXPECT_EQ(robot_update.entities[0].models.size(), 1U);
@@ -105,7 +165,7 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
 
     foxglove_msgs::SceneUpdate path_update;
     appendSceneEntityPart(RobotModelKind::kFs150, "uav1", SceneEntityPart::kPath, markers, 0U, ros::Time(42, 0), "world",
-                          &path_update);
+                          blackLabelStyle(), &path_update);
     ASSERT_EQ(path_update.entities.size(), 1U);
     EXPECT_EQ(path_update.entities[0].id, "xgc2/px4/uav1/path");
     EXPECT_EQ(path_update.entities[0].lines.size(), 1U);
@@ -114,7 +174,8 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
     EXPECT_TRUE(path_update.entities[0].lifetime.isZero());
 
     foxglove_msgs::SceneUpdate legacy_full_update;
-    appendSceneEntity(RobotModelKind::kFs150, "uav1", markers, 0U, ros::Time(42, 0), "world", &legacy_full_update);
+    appendSceneEntity(RobotModelKind::kFs150, "uav1", markers, 0U, ros::Time(42, 0), "world", blackLabelStyle(),
+                      &legacy_full_update);
     EXPECT_LT(ros::serialization::serializationLength(robot_update),
               ros::serialization::serializationLength(legacy_full_update));
 }
@@ -186,11 +247,11 @@ TEST(SceneContract, MixedFleetSceneSerializationBudgetIsBounded) {
         label.scale.z = 0.32;
         markers.markers.push_back(label);
 
-        appendSceneEntity(kind, name, markers, 0U, ros::Time(42, 0), "world", &legacy_updates);
+        appendSceneEntity(kind, name, markers, 0U, ros::Time(42, 0), "world", blackLabelStyle(), &legacy_updates);
         appendSceneEntityPart(kind, name, SceneEntityPart::kRobot, markers, 0U, ros::Time(42, 0), "world",
-                              &robot_updates);
+                              blackLabelStyle(), &robot_updates);
         appendSceneEntityPart(kind, name, SceneEntityPart::kPath, markers, 0U, ros::Time(42, 0), "world",
-                              &path_updates);
+                              blackLabelStyle(), &path_updates);
     }
 
     ASSERT_EQ(legacy_updates.entities.size(), 10U);

@@ -4,6 +4,7 @@
 #include <set>
 #include <string>
 
+#include <foxglove_msgs/Color.h>
 #include <foxglove_msgs/SceneUpdate.h>
 #include <ros/time.h>
 #include <visualization_msgs/MarkerArray.h>
@@ -24,6 +25,13 @@ struct SceneUpdateCadenceDecision {
     bool publish_robot{false};
     bool publish_path{false};
 };
+
+struct SceneLabelStyle {
+    double font_size{0.0};
+    foxglove_msgs::Color color;
+};
+
+SceneLabelStyle sceneLabelStyleFromMarkerColor(const std::string& marker_color);
 
 class SceneUpdateCadence {
   public:
@@ -61,10 +69,12 @@ std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name
 
 void appendSceneEntity(RobotModelKind kind, const std::string& model_name,
                        const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
-                       const ros::Time& timestamp, const std::string& frame_id, foxglove_msgs::SceneUpdate* update);
+                       const ros::Time& timestamp, const std::string& frame_id, const SceneLabelStyle& label_style,
+                       foxglove_msgs::SceneUpdate* update);
 
 void appendSceneEntityPart(RobotModelKind kind, const std::string& model_name, SceneEntityPart part,
                            const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
-                           const ros::Time& timestamp, const std::string& frame_id, foxglove_msgs::SceneUpdate* update);
+                           const ros::Time& timestamp, const std::string& frame_id,
+                           const SceneLabelStyle& label_style, foxglove_msgs::SceneUpdate* update);
 
 } // namespace gazebo_sim_visualization
