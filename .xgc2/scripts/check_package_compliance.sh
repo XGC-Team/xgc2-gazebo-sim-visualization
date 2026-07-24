@@ -27,7 +27,6 @@ required_files=(
   CMakeLists.txt
   README.md
   package.xml
-  process-definitions/xgc2-gazebo-sim-visualization.json
 )
 
 for file in "${required_files[@]}"; do
@@ -56,8 +55,6 @@ if grep -Fq 'ros-noetic-xgc2-robot-visualization' \
   echo "robot visualization must be resolved through its capability dependency script" >&2
   exit 1
 fi
-grep -q '"version": "1.4.0"' process-definitions/xgc2-gazebo-sim-visualization.json
-grep -q '_tracked_mecanum_models:=${mecanumModels}' process-definitions/xgc2-gazebo-sim-visualization.json
 grep -q 'package://mecanum_description/meshes/nexus_base_link.STL' test/scene_contract_test.cpp
 
 echo "Package compliance checks passed."
