@@ -33,6 +33,21 @@ struct SceneLabelStyle {
 
 SceneLabelStyle sceneLabelStyleFromMarkerColor(const std::string& marker_color);
 
+// PublishCadence is one rate gate. It exists so a publisher can give each kind
+// of fact its own cadence -- a pose, a path trail and a rotor animation are not
+// equally urgent -- without every caller reimplementing drift-free gating.
+class PublishCadence {
+  public:
+    explicit PublishCadence(double publish_rate);
+
+    bool take(const ros::Time& now);
+
+  private:
+    double publish_rate_;
+    bool initialized_{false};
+    ros::Time last_stamp_;
+};
+
 class SceneUpdateCadence {
   public:
     SceneUpdateCadence(double robot_publish_rate, double path_publish_rate);

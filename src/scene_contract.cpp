@@ -197,7 +197,11 @@ std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name
 SceneUpdateCadence::SceneUpdateCadence(double robot_publish_rate, double path_publish_rate)
     : robot_publish_rate_(std::max(1.0, robot_publish_rate)), path_publish_rate_(std::max(0.1, path_publish_rate)) {}
 
-bool SceneUpdateCadence::takeGate(const ros::Time& now, double rate, bool* initialized, ros::Time* last_stamp) {
+namespace {
+
+// One drift-free rate gate, shared by every cadence in this file so a pose, a
+// path trail and a joint animation all advance the same way.
+bool takeRateGate(const ros::Time& now, double rate, bool* initialized, ros::Time* last_stamp) {
     if (initialized == nullptr || last_stamp == nullptr) {
         throw std::invalid_argument("scene update cadence gate state must be valid");
     }
@@ -219,6 +223,19 @@ bool SceneUpdateCadence::takeGate(const ros::Time& now, double rate, bool* initi
     const double elapsed_periods = std::floor((elapsed + 1.0e-9) / period);
     *last_stamp += ros::Duration(elapsed_periods * period);
     return true;
+}
+
+}  // namespace
+
+bool SceneUpdateCadence::takeGate(const ros::Time& now, double rate, bool* initialized, ros::Time* last_stamp) {
+    return takeRateGate(now, rate, initialized, last_stamp);
+}
+
+PublishCadence::PublishCadence(double publish_rate)
+    : publish_rate_(publish_rate > 0.0 ? publish_rate : 1.0) {}
+
+bool PublishCadence::take(const ros::Time& now) {
+    return takeRateGate(now, publish_rate_, &initialized_, &last_stamp_);
 }
 
 SceneUpdateCadenceDecision SceneUpdateCadence::take(const ros::Time& now) {

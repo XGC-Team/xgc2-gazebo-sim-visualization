@@ -23,6 +23,7 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/Twist.h>
 #include <geometry_msgs/TwistStamped.h>
+#include <mavros_msgs/ExtendedState.h>
 #include <mavros_msgs/State.h>
 #include <ros/ros.h>
 #include <tf2_ros/transform_broadcaster.h>
@@ -108,13 +109,29 @@ class GazeboAutoVisualizer {
         private_nh_.param("publish_scene_update", publish_scene_update_, false);
         private_nh_.param("publish_rate", publish_rate_, 30.0);
         private_nh_.param("scene_publish_rate", scene_publish_rate_, 10.0);
-        private_nh_.param("scene_path_publish_rate", scene_path_publish_rate_, 2.0);
+        private_nh_.param("scene_path_publish_rate", scene_path_publish_rate_, 10.0);
+        // The gradient is deliberate. A pose is what an operator reads, so it runs
+        // at the timer rate. A trail has to stay attached to the robot drawing it
+        // -- at 0.2 Hz the history visibly trailed the aircraft -- so it sits one
+        // step down. A spinning propeller or wheel indicates the vehicle is
+        // armed and moving; it is an animation, not a measurement, so it is last.
+        private_nh_.param("joint_transform_publish_rate", joint_transform_publish_rate_, 5.0);
         private_nh_.param("path_publish_rate", path_publish_rate_, 10.0);
         private_nh_.param("path_limit", path_limit_, 3000);
         private_nh_.param("path_history_duration", path_history_duration_sec_, 15.0);
         private_nh_.param("vrpn_timeout", vrpn_timeout_sec_, 0.5);
         private_nh_.param("mavros_state_timeout", mavros_state_timeout_sec_, 2.0);
         private_nh_.param<std::string>("mavros_state_topic_suffix", mavros_state_topic_suffix_, "/mavros/state");
+        // EKF2's fused pose, not local_position/odom: both come from the same
+        // estimator, and the pose form is what the 3D view consumes directly.
+        private_nh_.param<std::string>("uav_estimated_pose_topic_suffix", uav_estimated_pose_topic_suffix_,
+                                       "/mavros/local_position/pose");
+        private_nh_.param("estimated_pose_timeout", estimated_pose_timeout_sec_, 1.0);
+        private_nh_.param<std::string>("mavros_extended_state_topic_suffix",
+                                       mavros_extended_state_topic_suffix_, "/mavros/extended_state");
+        private_nh_.param("uav_rotor_speed_ground", uav_rotor_speed_ground_rad_s_, 25.0);
+        private_nh_.param("uav_rotor_speed_transition", uav_rotor_speed_transition_rad_s_, 90.0);
+        private_nh_.param("uav_rotor_speed_airborne", uav_rotor_speed_airborne_rad_s_, 60.0);
         private_nh_.param("ugv_motion_timeout", ugv_motion_timeout_sec_, 0.5);
         private_nh_.param<std::string>("ugv_cmd_vel_topic_suffix", ugv_cmd_vel_topic_suffix_, "/cmd_vel");
         private_nh_.param<std::string>("ugv_twist_topic_suffix", ugv_twist_topic_suffix_, "/twist");
@@ -130,6 +147,7 @@ class GazeboAutoVisualizer {
         publish_rate_ = std::max(1.0, publish_rate_);
         scene_publish_rate_ = std::min(publish_rate_, std::max(1.0, scene_publish_rate_));
         scene_path_publish_rate_ = std::min(publish_rate_, std::max(0.1, scene_path_publish_rate_));
+        joint_transform_publish_rate_ = std::min(publish_rate_, std::max(0.1, joint_transform_publish_rate_));
         path_publish_rate_ = std::max(1.0, path_publish_rate_);
         mavros_state_timeout_sec_ = std::max(0.0, mavros_state_timeout_sec_);
         ugv_motion_timeout_sec_ = std::max(0.0, ugv_motion_timeout_sec_);
@@ -202,6 +220,8 @@ class GazeboAutoVisualizer {
                 new gazebo_sim_visualization::SceneUpdateCadence(scene_publish_rate_, scene_path_publish_rate_));
             publishSceneReset();
         }
+        joint_transform_cadence_.reset(
+            new gazebo_sim_visualization::PublishCadence(joint_transform_publish_rate_));
 
         model_states_sub_ = nh_.subscribe(model_states_topic_, 5, &GazeboAutoVisualizer::modelStatesCallback, this);
         publish_timer_ =
@@ -214,10 +234,18 @@ class GazeboAutoVisualizer {
         gazebo_sim_visualization::RobotModelKind kind;
         geometry_msgs::Pose gazebo_pose;
         geometry_msgs::Pose vrpn_pose;
+        geometry_msgs::Pose estimated_pose;
         bool has_gazebo_pose{false};
         bool has_vrpn_pose{false};
+        bool has_estimated_pose{false};
+        ros::Time estimated_stamp;
+        ros::Subscriber estimated_pose_subscriber;
         bool has_mavros_state{false};
         bool mavros_armed{false};
+        std::uint8_t mavros_landed_state{0};
+        bool has_mavros_extended_state{false};
+        ros::Time mavros_extended_state_stamp;
+        ros::Subscriber mavros_extended_state_subscriber;
         ros::Time vrpn_stamp;
         ros::Time mavros_state_stamp;
         geometry_msgs::Twist cmd_vel;
@@ -245,6 +273,12 @@ class GazeboAutoVisualizer {
         model.vrpn_subscriber = subscribeVrpn(name);
         if (kind == gazebo_sim_visualization::RobotModelKind::kFs150) {
             model.mavros_state_subscriber = subscribeMavrosState(name);
+            model.mavros_extended_state_subscriber = subscribeMavrosExtendedState(name);
+            // Draw the aircraft where its own flight controller believes it is.
+            // Mocap is ground truth, and rendering ground truth hides exactly the
+            // thing an operator needs to see: a divergence between the fused
+            // estimate and the world.
+            model.estimated_pose_subscriber = subscribeEstimatedPose(name);
         } else {
             model.cmd_vel_subscriber = subscribeUgvCmdVel(name);
             model.twist_subscriber = subscribeUgvTwist(name);
@@ -288,6 +322,43 @@ class GazeboAutoVisualizer {
                                                          [this, name](const geometry_msgs::PoseStampedConstPtr& msg) {
                                                              vrpnPoseCallback(name, msg);
                                                          });
+    }
+
+    // The aircraft estimate is a plain PoseStamped, so consuming it costs no
+    // MAVROS message dependency -- only the topic name is MAVROS specific.
+    ros::Subscriber subscribeEstimatedPose(const std::string& name) {
+        const std::string topic = modelScopedTopic(name, uav_estimated_pose_topic_suffix_,
+                                                   "/mavros/local_position/pose");
+        return nh_.subscribe<geometry_msgs::PoseStamped>(
+            topic, 10, [this, name](const geometry_msgs::PoseStampedConstPtr& msg) {
+                estimatedPoseCallback(name, msg->pose, msg->header.stamp);
+            });
+    }
+
+    void estimatedPoseCallback(const std::string& name, const geometry_msgs::Pose& pose,
+                               const ros::Time& stamp) {
+        auto it = models_.find(name);
+        if (it == models_.end()) {
+            return;
+        }
+        it->second.estimated_pose = copyPose(pose);
+        it->second.estimated_stamp = stamp.isZero() ? ros::Time::now() : stamp;
+        it->second.has_estimated_pose = true;
+    }
+
+    ros::Subscriber subscribeMavrosExtendedState(const std::string& name) {
+        const std::string topic =
+            modelScopedTopic(name, mavros_extended_state_topic_suffix_, "/mavros/extended_state");
+        return nh_.subscribe<mavros_msgs::ExtendedState>(
+            topic, 10, [this, name](const mavros_msgs::ExtendedStateConstPtr& msg) {
+                auto it = models_.find(name);
+                if (it == models_.end()) {
+                    return;
+                }
+                it->second.mavros_landed_state = msg->landed_state;
+                it->second.has_mavros_extended_state = true;
+                it->second.mavros_extended_state_stamp = ros::Time::now();
+            });
     }
 
     ros::Subscriber subscribeMavrosState(const std::string& name) {
@@ -361,8 +432,18 @@ class GazeboAutoVisualizer {
         it->second.has_twist = true;
     }
 
+    // Preference order is deliberate: what the robot believes, then what the
+    // world measured, then where the simulator put it. Only the aircraft
+    // publishes its own estimate -- drawing it where EKF2 thinks it is, rather
+    // than where mocap knows it is, is what makes a fusion divergence visible.
+    // Ground vehicles carry no such estimator, so they fall through to mocap,
+    // which is their real localisation source.
     const geometry_msgs::Pose* selectPose(const TrackedModel& model) const {
-        if (model.has_vrpn_pose && ros::Time::now() - model.vrpn_stamp <= ros::Duration(vrpn_timeout_sec_)) {
+        const ros::Time now = ros::Time::now();
+        if (model.has_estimated_pose && now - model.estimated_stamp <= ros::Duration(estimated_pose_timeout_sec_)) {
+            return &model.estimated_pose;
+        }
+        if (model.has_vrpn_pose && now - model.vrpn_stamp <= ros::Duration(vrpn_timeout_sec_)) {
             return &model.vrpn_pose;
         }
         return model.has_gazebo_pose ? &model.gazebo_pose : nullptr;
@@ -507,7 +588,27 @@ class GazeboAutoVisualizer {
         }
 
         if (publish_transforms_ && !transforms.empty()) {
-            tf_broadcaster_.sendTransform(transforms);
+            // A robot's own pose and its joint angles are not the same kind of
+            // fact. The pose is what an operator is reading; a spinning rotor is
+            // an indication that the aircraft is armed. Publishing both at the
+            // pose rate meant 68 of the 80 frames -- every wheel and rotor --
+            // paid the highest cadence in the system for an animation.
+            //
+            // The body transform is the only one parented to the world frame;
+            // every joint hangs off its own robot's base link. That is a
+            // semantic split, not a positional one, so it cannot drift if a
+            // visualizer changes the order in which it appends.
+            const bool publish_joints = joint_transform_cadence_->take(now);
+            std::vector<geometry_msgs::TransformStamped> outgoing;
+            outgoing.reserve(transforms.size());
+            for (const geometry_msgs::TransformStamped& transform : transforms) {
+                if (publish_joints || transform.header.frame_id == frame_id_) {
+                    outgoing.push_back(transform);
+                }
+            }
+            if (!outgoing.empty()) {
+                tf_broadcaster_.sendTransform(outgoing);
+            }
         }
         if (publish_markers_) {
             marker_pub_.publish(markers);
@@ -537,6 +638,14 @@ class GazeboAutoVisualizer {
     std::string frame_id_;
     std::string model_states_topic_;
     std::string vrpn_pose_prefix_;
+    std::string uav_estimated_pose_topic_suffix_;
+    std::string mavros_extended_state_topic_suffix_;
+    double uav_rotor_speed_ground_rad_s_{25.0};
+    double uav_rotor_speed_transition_rad_s_{90.0};
+    double uav_rotor_speed_airborne_rad_s_{60.0};
+    double estimated_pose_timeout_sec_{1.0};
+    double joint_transform_publish_rate_{5.0};
+    std::unique_ptr<gazebo_sim_visualization::PublishCadence> joint_transform_cadence_;
     std::string tracked_uav_models_csv_;
     std::string tracked_ugv_models_csv_;
     std::string tracked_fs150_models_csv_;
