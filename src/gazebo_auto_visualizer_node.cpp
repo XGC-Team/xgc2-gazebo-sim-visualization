@@ -573,7 +573,7 @@ class GazeboAutoVisualizer {
         if (publish_scene_update_) {
             scene_decision = scene_update_cadence_->take(now);
         }
-        if (!publish_markers_ && !publish_transforms_ && !scene_decision.publish_robot &&
+        if (!publish_markers_ && !publish_transforms_ && !scene_decision.publish_label &&
             !scene_decision.publish_path) {
             return;
         }
@@ -601,18 +601,13 @@ class GazeboAutoVisualizer {
             } else {
                 ugv_visualizer_->append(makeUgvVisualState(model, *pose, now), &markers, &transforms);
             }
-            if (scene_decision.publish_robot) {
-                gazebo_sim_visualization::appendSceneEntityPart(
-                    model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kRobot, markers, first_marker,
-                    now, frame_id_, scene_label_style_, &scene_update);
-            }
             if (scene_decision.publish_path) {
                 gazebo_sim_visualization::appendSceneEntityPart(
                     model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
                     now, frame_id_, scene_label_style_, &scene_update);
             }
-            if (scene_decision.publish_robot) {
-                // The label rides the robot cadence because its content -- a
+            if (scene_decision.publish_label) {
+                // The label rides the scene cadence because its content -- a
                 // name, a colour, a font size -- does not change. Where it is
                 // drawn comes from its anchor transform instead, which is why
                 // it can move at the pose rate without being retransmitted.

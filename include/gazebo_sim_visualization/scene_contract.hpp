@@ -20,15 +20,19 @@ enum class RobotModelKind { kNone, kFs150, kScout, kMecanum };
 // high-rate robot geometry and the lower-rate path in separate entities so a
 // pose update cannot erase a path which was intentionally not retransmitted.
 //
-// The label is separate for a different reason. Geometry and trail are drawn
-// where the message said they were; the label is anchored to a frame and drawn
-// wherever that frame currently is. Mixing the two in one entity would force
-// the whole bundle -- every mesh reference included -- to be retransmitted at
-// the rate the label needs to move.
-enum class SceneEntityPart { kRobot, kPath, kLabel };
+// The label is separate for a different reason. A trail is drawn where the
+// message said it was; the label is anchored to a frame and drawn wherever that
+// frame currently is, and one entity names exactly one frame.
+//
+// Robot geometry is not here at all. Every mesh this scene used to ship is a
+// link of the robot's own URDF, which the viewer loads once from a parameter
+// and places from transforms -- so shipping it again, in world coordinates, at
+// the scene cadence, drew each vehicle twice: once smoothly from the
+// description and once two-per-second on top of it.
+enum class SceneEntityPart { kPath, kLabel };
 
 struct SceneUpdateCadenceDecision {
-    bool publish_robot{false};
+    bool publish_label{false};
     bool publish_path{false};
 };
 
@@ -56,18 +60,18 @@ class PublishCadence {
 
 class SceneUpdateCadence {
   public:
-    SceneUpdateCadence(double robot_publish_rate, double path_publish_rate);
+    SceneUpdateCadence(double label_publish_rate, double path_publish_rate);
 
     SceneUpdateCadenceDecision take(const ros::Time& now);
 
   private:
     bool takeGate(const ros::Time& now, double rate, bool* initialized, ros::Time* last_stamp);
 
-    double robot_publish_rate_;
+    double label_publish_rate_;
     double path_publish_rate_;
-    bool robot_initialized_{false};
+    bool label_initialized_{false};
     bool path_initialized_{false};
-    ros::Time last_robot_stamp_;
+    ros::Time last_label_stamp_;
     ros::Time last_path_stamp_;
 };
 

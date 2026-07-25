@@ -191,18 +191,11 @@ std::string sceneEntityID(RobotModelKind kind, const std::string& model_name) {
 
 std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name, SceneEntityPart part) {
     const std::string robot_id = sceneEntityID(kind, model_name);
-    switch (part) {
-    case SceneEntityPart::kPath:
-        return robot_id + "/path";
-    case SceneEntityPart::kLabel:
-        return robot_id + "/label";
-    default:
-        return robot_id;
-    }
+    return part == SceneEntityPart::kPath ? robot_id + "/path" : robot_id + "/label";
 }
 
-SceneUpdateCadence::SceneUpdateCadence(double robot_publish_rate, double path_publish_rate)
-    : robot_publish_rate_(std::max(1.0, robot_publish_rate)), path_publish_rate_(std::max(0.1, path_publish_rate)) {}
+SceneUpdateCadence::SceneUpdateCadence(double label_publish_rate, double path_publish_rate)
+    : label_publish_rate_(std::max(1.0, label_publish_rate)), path_publish_rate_(std::max(0.1, path_publish_rate)) {}
 
 namespace {
 
@@ -247,7 +240,7 @@ bool PublishCadence::take(const ros::Time& now) {
 
 SceneUpdateCadenceDecision SceneUpdateCadence::take(const ros::Time& now) {
     SceneUpdateCadenceDecision decision;
-    decision.publish_robot = takeGate(now, robot_publish_rate_, &robot_initialized_, &last_robot_stamp_);
+    decision.publish_label = takeGate(now, label_publish_rate_, &label_initialized_, &last_label_stamp_);
     decision.publish_path = takeGate(now, path_publish_rate_, &path_initialized_, &last_path_stamp_);
     return decision;
 }
@@ -260,14 +253,7 @@ bool markerBelongsToPart(const visualization_msgs::Marker& marker, SceneEntityPa
                          marker.ns.size() >= path_suffix.size() &&
                          marker.ns.compare(marker.ns.size() - path_suffix.size(), path_suffix.size(), path_suffix) == 0;
     const bool is_label = marker.type == visualization_msgs::Marker::TEXT_VIEW_FACING;
-    switch (part) {
-    case SceneEntityPart::kPath:
-        return is_path;
-    case SceneEntityPart::kLabel:
-        return is_label;
-    default:
-        return !is_path && !is_label;
-    }
+    return part == SceneEntityPart::kPath ? is_path : is_label;
 }
 
 // A label is anchored rather than positioned: its entity names the robot's own

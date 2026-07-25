@@ -154,20 +154,15 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
     visualization_msgs::MarkerArray markers;
     markers.markers = {mesh, path, label};
 
-    foxglove_msgs::SceneUpdate robot_update;
-    appendSceneEntityPart(RobotModelKind::kFs150, "uav1", SceneEntityPart::kRobot, markers, 0U, ros::Time(42, 0), "world",
-                          blackLabelStyle(), &robot_update);
-    ASSERT_EQ(robot_update.entities.size(), 1U);
-    EXPECT_EQ(robot_update.entities[0].id, "xgc2/px4/uav1");
-    EXPECT_EQ(robot_update.entities[0].models.size(), 1U);
-    // The label left this entity. Geometry is drawn where the message put it;
-    // a label is drawn wherever its anchor currently is, and one entity cannot
-    // hold both because an entity names exactly one frame.
-    EXPECT_TRUE(robot_update.entities[0].texts.empty());
-    EXPECT_FALSE(robot_update.entities[0].frame_locked);
-    EXPECT_EQ(robot_update.entities[0].frame_id, "world");
-    EXPECT_TRUE(robot_update.entities[0].lines.empty());
-    EXPECT_TRUE(robot_update.entities[0].lifetime.isZero());
+    // Geometry is not a scene entity any more. Every mesh here is a link of the
+    // robot's own URDF, which the viewer loads once and places from transforms,
+    // so a part that carried it would draw each vehicle a second time.
+    foxglove_msgs::SceneUpdate path_only;
+    appendSceneEntityPart(RobotModelKind::kFs150, "uav1", SceneEntityPart::kPath, markers, 0U, ros::Time(42, 0),
+                          "world", blackLabelStyle(), &path_only);
+    for (const foxglove_msgs::SceneEntity& entity : path_only.entities) {
+        EXPECT_TRUE(entity.models.empty()) << "a scene part shipped robot geometry the URDF already draws";
+    }
 
     foxglove_msgs::SceneUpdate path_update;
     appendSceneEntityPart(RobotModelKind::kFs150, "uav1", SceneEntityPart::kPath, markers, 0U, ros::Time(42, 0), "world",
@@ -197,7 +192,7 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
     foxglove_msgs::SceneUpdate legacy_full_update;
     appendSceneEntity(RobotModelKind::kFs150, "uav1", markers, 0U, ros::Time(42, 0), "world", blackLabelStyle(),
                       &legacy_full_update);
-    EXPECT_LT(ros::serialization::serializationLength(robot_update),
+    EXPECT_LT(ros::serialization::serializationLength(label_update),
               ros::serialization::serializationLength(legacy_full_update));
 }
 
@@ -205,31 +200,31 @@ TEST(SceneContract, SceneCadenceSeparatesRobotAndPathUpdatesWithoutDrift) {
     SceneUpdateCadence cadence(10.0, 2.0);
 
     SceneUpdateCadenceDecision decision = cadence.take(ros::Time(10, 0));
-    EXPECT_TRUE(decision.publish_robot);
+    EXPECT_TRUE(decision.publish_label);
     EXPECT_TRUE(decision.publish_path);
 
     decision = cadence.take(ros::Time(10, 50000000));
-    EXPECT_FALSE(decision.publish_robot);
+    EXPECT_FALSE(decision.publish_label);
     EXPECT_FALSE(decision.publish_path);
 
     decision = cadence.take(ros::Time(10, 100000000));
-    EXPECT_TRUE(decision.publish_robot);
+    EXPECT_TRUE(decision.publish_label);
     EXPECT_FALSE(decision.publish_path);
 
     decision = cadence.take(ros::Time(10, 500000000));
-    EXPECT_TRUE(decision.publish_robot);
+    EXPECT_TRUE(decision.publish_label);
     EXPECT_TRUE(decision.publish_path);
 
     // A simulated-clock reset immediately republishes a complete pair so the
     // consumer cannot remain stuck with stale entities from the old epoch.
     decision = cadence.take(ros::Time(1, 0));
-    EXPECT_TRUE(decision.publish_robot);
+    EXPECT_TRUE(decision.publish_label);
     EXPECT_TRUE(decision.publish_path);
 }
 
 TEST(SceneContract, MixedFleetSceneSerializationBudgetIsBounded) {
     foxglove_msgs::SceneUpdate legacy_updates;
-    foxglove_msgs::SceneUpdate robot_updates;
+    foxglove_msgs::SceneUpdate label_updates;
     foxglove_msgs::SceneUpdate path_updates;
 
     for (int robot_index = 1; robot_index <= 10; ++robot_index) {
@@ -269,24 +264,24 @@ TEST(SceneContract, MixedFleetSceneSerializationBudgetIsBounded) {
         markers.markers.push_back(label);
 
         appendSceneEntity(kind, name, markers, 0U, ros::Time(42, 0), "world", blackLabelStyle(), &legacy_updates);
-        appendSceneEntityPart(kind, name, SceneEntityPart::kRobot, markers, 0U, ros::Time(42, 0), "world",
-                              blackLabelStyle(), &robot_updates);
+        appendSceneEntityPart(kind, name, SceneEntityPart::kLabel, markers, 0U, ros::Time(42, 0), "world",
+                              blackLabelStyle(), &label_updates);
         appendSceneEntityPart(kind, name, SceneEntityPart::kPath, markers, 0U, ros::Time(42, 0), "world",
                               blackLabelStyle(), &path_updates);
     }
 
     ASSERT_EQ(legacy_updates.entities.size(), 10U);
-    ASSERT_EQ(robot_updates.entities.size(), 10U);
+    ASSERT_EQ(label_updates.entities.size(), 10U);
     ASSERT_EQ(path_updates.entities.size(), 10U);
-    EXPECT_EQ(robot_updates.entities.front().id, "xgc2/px4/uav1");
-    EXPECT_EQ(robot_updates.entities.back().id, "xgc2/scout/ugv4");
+    EXPECT_EQ(label_updates.entities.front().id, "xgc2/px4/uav1/label");
+    EXPECT_EQ(label_updates.entities.back().id, "xgc2/scout/ugv4/label");
     EXPECT_EQ(path_updates.entities.front().id, "xgc2/px4/uav1/path");
     EXPECT_EQ(path_updates.entities.back().id, "xgc2/scout/ugv4/path");
 
     const std::size_t legacy_bytes_per_second =
         ros::serialization::serializationLength(legacy_updates) * static_cast<std::size_t>(30);
     const std::size_t bounded_bytes_per_second =
-        ros::serialization::serializationLength(robot_updates) * static_cast<std::size_t>(10) +
+        ros::serialization::serializationLength(label_updates) * static_cast<std::size_t>(10) +
         ros::serialization::serializationLength(path_updates) * static_cast<std::size_t>(2);
     RecordProperty("legacy_bytes_per_second", static_cast<int>(legacy_bytes_per_second));
     RecordProperty("bounded_bytes_per_second", static_cast<int>(bounded_bytes_per_second));
