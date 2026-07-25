@@ -611,6 +611,15 @@ class GazeboAutoVisualizer {
                     model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
                     now, frame_id_, scene_label_style_, &scene_update);
             }
+            if (scene_decision.publish_robot) {
+                // The label rides the robot cadence because its content -- a
+                // name, a colour, a font size -- does not change. Where it is
+                // drawn comes from its anchor transform instead, which is why
+                // it can move at the pose rate without being retransmitted.
+                gazebo_sim_visualization::appendSceneEntityPart(
+                    model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kLabel, markers, first_marker,
+                    now, frame_id_, scene_label_style_, &scene_update);
+            }
         }
 
         if (publish_transforms_ && !transforms.empty()) {

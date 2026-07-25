@@ -191,7 +191,14 @@ std::string sceneEntityID(RobotModelKind kind, const std::string& model_name) {
 
 std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name, SceneEntityPart part) {
     const std::string robot_id = sceneEntityID(kind, model_name);
-    return part == SceneEntityPart::kPath ? robot_id + "/path" : robot_id;
+    switch (part) {
+    case SceneEntityPart::kPath:
+        return robot_id + "/path";
+    case SceneEntityPart::kLabel:
+        return robot_id + "/label";
+    default:
+        return robot_id;
+    }
 }
 
 SceneUpdateCadence::SceneUpdateCadence(double robot_publish_rate, double path_publish_rate)
@@ -252,10 +259,22 @@ bool markerBelongsToPart(const visualization_msgs::Marker& marker, SceneEntityPa
     const bool is_path = marker.type == visualization_msgs::Marker::LINE_STRIP &&
                          marker.ns.size() >= path_suffix.size() &&
                          marker.ns.compare(marker.ns.size() - path_suffix.size(), path_suffix.size(), path_suffix) == 0;
-    if (part == SceneEntityPart::kPath) {
+    const bool is_label = marker.type == visualization_msgs::Marker::TEXT_VIEW_FACING;
+    switch (part) {
+    case SceneEntityPart::kPath:
         return is_path;
+    case SceneEntityPart::kLabel:
+        return is_label;
+    default:
+        return !is_path && !is_label;
     }
-    return !is_path;
+}
+
+// A label is anchored rather than positioned: its entity names the robot's own
+// label frame and asks the viewer to follow it. Every other part is drawn in
+// world coordinates exactly where the message placed it.
+bool partFollowsItsFrame(const SceneEntityPart* part) {
+    return part != nullptr && *part == SceneEntityPart::kLabel;
 }
 
 void appendSceneEntityImpl(RobotModelKind kind, const std::string& entity_id,
@@ -274,6 +293,18 @@ void appendSceneEntityImpl(RobotModelKind kind, const std::string& entity_id,
     entity.id = entity_id;
     entity.lifetime = ros::Duration(0.0);
     entity.frame_locked = false;
+    if (partFollowsItsFrame(part)) {
+        // Take the frame from the marker itself: the visualizer that built it
+        // is the one that knows which anchor it belongs to, and a caller
+        // passing the world frame for every part cannot know that.
+        for (std::size_t index = first_marker; index < markers.markers.size(); ++index) {
+            if (markerBelongsToPart(markers.markers[index], *part)) {
+                entity.frame_id = markers.markers[index].header.frame_id;
+                entity.frame_locked = true;
+                break;
+            }
+        }
+    }
 
     for (std::size_t index = first_marker; index < markers.markers.size(); ++index) {
         const visualization_msgs::Marker& marker = markers.markers[index];

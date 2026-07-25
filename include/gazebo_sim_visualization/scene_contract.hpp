@@ -19,7 +19,13 @@ enum class RobotModelKind { kNone, kFs150, kScout, kMecanum };
 // SceneEntity updates replace the complete entity with the same ID. Keep the
 // high-rate robot geometry and the lower-rate path in separate entities so a
 // pose update cannot erase a path which was intentionally not retransmitted.
-enum class SceneEntityPart { kRobot, kPath };
+//
+// The label is separate for a different reason. Geometry and trail are drawn
+// where the message said they were; the label is anchored to a frame and drawn
+// wherever that frame currently is. Mixing the two in one entity would force
+// the whole bundle -- every mesh reference included -- to be retransmitted at
+// the rate the label needs to move.
+enum class SceneEntityPart { kRobot, kPath, kLabel };
 
 struct SceneUpdateCadenceDecision {
     bool publish_robot{false};

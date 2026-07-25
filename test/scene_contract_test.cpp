@@ -146,6 +146,7 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
 
     visualization_msgs::Marker label;
     label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+    label.header.frame_id = "uav1/label";
     label.pose.orientation.w = 1.0;
     label.text = "UAV 1";
     label.scale.z = 0.32;
@@ -159,7 +160,12 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
     ASSERT_EQ(robot_update.entities.size(), 1U);
     EXPECT_EQ(robot_update.entities[0].id, "xgc2/px4/uav1");
     EXPECT_EQ(robot_update.entities[0].models.size(), 1U);
-    EXPECT_EQ(robot_update.entities[0].texts.size(), 1U);
+    // The label left this entity. Geometry is drawn where the message put it;
+    // a label is drawn wherever its anchor currently is, and one entity cannot
+    // hold both because an entity names exactly one frame.
+    EXPECT_TRUE(robot_update.entities[0].texts.empty());
+    EXPECT_FALSE(robot_update.entities[0].frame_locked);
+    EXPECT_EQ(robot_update.entities[0].frame_id, "world");
     EXPECT_TRUE(robot_update.entities[0].lines.empty());
     EXPECT_TRUE(robot_update.entities[0].lifetime.isZero());
 
@@ -172,6 +178,21 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
     EXPECT_TRUE(path_update.entities[0].models.empty());
     EXPECT_TRUE(path_update.entities[0].texts.empty());
     EXPECT_TRUE(path_update.entities[0].lifetime.isZero());
+
+    // A label follows its anchor instead of being redrawn: the entity names the
+    // robot's own label frame and asks the viewer to re-resolve it. That is the
+    // whole reason a label transmitted twice a second can move thirty times a
+    // second, so both halves are asserted here.
+    foxglove_msgs::SceneUpdate label_update;
+    appendSceneEntityPart(RobotModelKind::kFs150, "uav1", SceneEntityPart::kLabel, markers, 0U, ros::Time(42, 0),
+                          "world", blackLabelStyle(), &label_update);
+    ASSERT_EQ(label_update.entities.size(), 1U);
+    EXPECT_EQ(label_update.entities[0].id, "xgc2/px4/uav1/label");
+    EXPECT_EQ(label_update.entities[0].frame_id, "uav1/label");
+    EXPECT_TRUE(label_update.entities[0].frame_locked);
+    EXPECT_EQ(label_update.entities[0].texts.size(), 1U);
+    EXPECT_TRUE(label_update.entities[0].models.empty());
+    EXPECT_TRUE(label_update.entities[0].lines.empty());
 
     foxglove_msgs::SceneUpdate legacy_full_update;
     appendSceneEntity(RobotModelKind::kFs150, "uav1", markers, 0U, ros::Time(42, 0), "world", blackLabelStyle(),
