@@ -26,7 +26,7 @@
 #include <mavros_msgs/ExtendedState.h>
 #include <mavros_msgs/State.h>
 #include <ros/ros.h>
-#include <tf2_ros/transform_broadcaster.h>
+#include <tf2_msgs/TFMessage.h>
 #include <visualization_msgs/MarkerArray.h>
 
 namespace {
@@ -98,6 +98,7 @@ class GazeboAutoVisualizer {
         private_nh_.param<std::string>("tracked_scout_models", tracked_scout_models_csv_, "");
         private_nh_.param<std::string>("tracked_mecanum_models", tracked_mecanum_models_csv_, "");
         private_nh_.param<std::string>("scene_update_topic", scene_update_topic_, "/xgc/scene");
+        private_nh_.param<std::string>("transform_topic", transform_topic_, "/xgc/tf");
         if (!private_nh_.getParam("marker_color", marker_color_)) {
             throw std::runtime_error("marker_color is required");
         }
@@ -223,6 +224,10 @@ class GazeboAutoVisualizer {
         joint_transform_cadence_.reset(
             new gazebo_sim_visualization::PublishCadence(joint_transform_publish_rate_));
 
+        if (publish_transforms_) {
+            transform_pub_ = nh_.advertise<tf2_msgs::TFMessage>(transform_topic_, 10, false);
+        }
+
         model_states_sub_ = nh_.subscribe(model_states_topic_, 5, &GazeboAutoVisualizer::modelStatesCallback, this);
         publish_timer_ =
             nh_.createTimer(ros::Duration(1.0 / publish_rate_), &GazeboAutoVisualizer::publishCallback, this);
@@ -344,6 +349,26 @@ class GazeboAutoVisualizer {
         it->second.estimated_pose = copyPose(pose);
         it->second.estimated_stamp = stamp.isZero() ? ros::Time::now() : stamp;
         it->second.has_estimated_pose = true;
+    }
+
+    // Rotor speed reads the flight state machine; it does not model aerodynamics.
+    // A few fixed tiers so an operator can tell parked from climbing from
+    // cruising at a glance. Anything finer is a number nobody reads, recomputed
+    // every frame for twelve aircraft.
+    double rotorSpeedFor(const TrackedModel& model, const ros::Time& now) const {
+        if (!model.has_mavros_extended_state ||
+            now - model.mavros_extended_state_stamp > ros::Duration(mavros_state_timeout_sec_)) {
+            return uav_rotor_speed_airborne_rad_s_;
+        }
+        switch (model.mavros_landed_state) {
+            case mavros_msgs::ExtendedState::LANDED_STATE_ON_GROUND:
+                return uav_rotor_speed_ground_rad_s_;
+            case mavros_msgs::ExtendedState::LANDED_STATE_TAKEOFF:
+            case mavros_msgs::ExtendedState::LANDED_STATE_LANDING:
+                return uav_rotor_speed_transition_rad_s_;
+            default:
+                return uav_rotor_speed_airborne_rad_s_;
+        }
     }
 
     ros::Subscriber subscribeMavrosExtendedState(const std::string& name) {
@@ -568,6 +593,7 @@ class GazeboAutoVisualizer {
                 state.name = model.name;
                 state.pose = *pose;
                 state.rotors_active = rotorsActive(model, now);
+                state.rotor_speed_rad_s = rotorSpeedFor(model, now);
                 state.stamp = now;
                 uav_visualizer_->append(state, &markers, &transforms);
             } else if (model.kind == gazebo_sim_visualization::RobotModelKind::kMecanum) {
@@ -607,7 +633,9 @@ class GazeboAutoVisualizer {
                 }
             }
             if (!outgoing.empty()) {
-                tf_broadcaster_.sendTransform(outgoing);
+                tf2_msgs::TFMessage message;
+                message.transforms = std::move(outgoing);
+                transform_pub_.publish(message);
             }
         }
         if (publish_markers_) {
@@ -624,7 +652,14 @@ class GazeboAutoVisualizer {
     ros::Publisher scene_update_pub_;
     ros::Subscriber model_states_sub_;
     ros::Timer publish_timer_;
-    tf2_ros::TransformBroadcaster tf_broadcaster_;
+    // Deliberately not tf2_ros::TransformBroadcaster: that publishes to the
+    // global /tf, where a simulator already broadcasts the same frame names at
+    // its own rate. Two publishers of one frame is a race, and forwarding /tf to
+    // a viewer would carry the simulator's whole high-rate tree with it. This
+    // node owns a topic instead -- the low-rate, product-owned view of the same
+    // tree, which a physical fleet can publish just as well.
+    ros::Publisher transform_pub_;
+    std::string transform_topic_;
     std::map<std::string, TrackedModel> models_;
     std::set<std::string> configured_fs150_models_;
     std::set<std::string> configured_scout_models_;

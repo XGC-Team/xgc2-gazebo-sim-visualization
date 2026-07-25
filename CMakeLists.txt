@@ -21,8 +21,16 @@ catkin_package(
   CATKIN_DEPENDS foxglove_msgs gazebo_msgs geometry_msgs mavros_msgs roscpp std_msgs tf2_ros visualization_msgs xgc2_robot_visualization
 )
 
+# xgc2_robot_visualization is checked out beside this package and also exists in
+# the installed ROS overlay. catkin_INCLUDE_DIRS puts the overlay prefix ahead of
+# workspace packages, so without naming the dependency first a development build
+# compiles against the installed headers -- a field added in the checkout is
+# invisible to its own consumer in the same build, and the failure reads as a
+# code error rather than a search order. Naming it is correct in an installed
+# build too, where it simply resolves to the same prefix.
 include_directories(
   include
+  ${xgc2_robot_visualization_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
 )
 
