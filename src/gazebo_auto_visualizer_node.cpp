@@ -108,6 +108,7 @@ class GazeboAutoVisualizer {
         private_nh_.param("publish_markers", publish_markers_, true);
         private_nh_.param("publish_transforms", publish_transforms_, true);
         private_nh_.param("publish_scene_update", publish_scene_update_, false);
+        private_nh_.param("publish_scene_paths", publish_scene_paths_, true);
         private_nh_.param("publish_rate", publish_rate_, 30.0);
         private_nh_.param("scene_publish_rate", scene_publish_rate_, 10.0);
         private_nh_.param("scene_path_publish_rate", scene_path_publish_rate_, 10.0);
@@ -601,7 +602,7 @@ class GazeboAutoVisualizer {
             } else {
                 ugv_visualizer_->append(makeUgvVisualState(model, *pose, now), &markers, &transforms);
             }
-            if (scene_decision.publish_path) {
+            if (publish_scene_paths_ && scene_decision.publish_path) {
                 gazebo_sim_visualization::appendSceneEntityPart(
                     model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
                     now, frame_id_, scene_label_style_, &scene_update);
@@ -717,6 +718,7 @@ class GazeboAutoVisualizer {
     bool publish_markers_{true};
     bool publish_transforms_{true};
     bool publish_scene_update_{false};
+    bool publish_scene_paths_{true};
 };
 
 int main(int argc, char** argv) {
