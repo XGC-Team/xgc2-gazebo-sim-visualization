@@ -9,7 +9,8 @@ test "$(rospack find gazebo_sim_visualization)" = "/opt/ros/${ROS_DISTRO}/share/
 test -x "/opt/ros/${ROS_DISTRO}/lib/gazebo_sim_visualization/gazebo_auto_visualizer_node"
 test -f "/opt/ros/${ROS_DISTRO}/share/gazebo_sim_visualization/rviz/gazebo_auto_visualization.rviz"
 
-roslaunch --files gazebo_sim_visualization gazebo_auto_visualization_rviz.launch rviz:=false \
+roslaunch --files gazebo_sim_visualization gazebo_auto_visualization_rviz.launch \
+  rviz:=false marker_color:=#000000 \
   >/tmp/xgc2-gazebo-auto-visualization-files.txt
 
 echo "Installed package check passed"
