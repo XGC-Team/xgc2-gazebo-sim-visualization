@@ -43,7 +43,7 @@ grep -q "PACKAGE=\"ros-noetic-xgc2-gazebo-sim-visualization\"" .xgc2/scripts/pac
 grep -q "gazebo_sim_visualization" package.xml
 grep -q "gazebo_auto_visualizer_node" CMakeLists.txt
 grep -q "gazebo_auto_visualization_rviz.launch" .xgc2/scripts/check_installed_packages.sh
-grep -q 'ros-noetic-xgc2-robot-visualization (>= 0.1.0-9)' .xgc2/scripts/package_debs.sh
+grep -q 'ros-noetic-xgc2-robot-visualization (>= 0.1.0-14)' .xgc2/scripts/package_debs.sh
 grep -Fq 'XGC2_ROBOT_VISUALIZATION_STANDALONE_SOURCE_REF' \
   .xgc2/scripts/install_robot_visualization_dependency.sh
 grep -Fq 'apt-cache policy "${package_name}"' \
