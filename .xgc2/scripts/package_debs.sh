@@ -60,7 +60,6 @@ copy_path() {
 
 copy_path "${PREFIX_ROOT}/share/${ROS_PACKAGE}"
 copy_path "${PREFIX_ROOT}/lib/${ROS_PACKAGE}"
-install -D -m 0644 \
 
 cat > "${PKG_ROOT}/DEBIAN/control" <<EOF
 Package: ${PACKAGE}
