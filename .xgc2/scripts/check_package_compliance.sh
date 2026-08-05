@@ -43,7 +43,20 @@ grep -q "PACKAGE=\"ros-noetic-xgc2-gazebo-sim-visualization\"" .xgc2/scripts/pac
 grep -q "gazebo_sim_visualization" package.xml
 grep -q "gazebo_auto_visualizer_node" CMakeLists.txt
 grep -q "gazebo_auto_visualization_rviz.launch" .xgc2/scripts/check_installed_packages.sh
-grep -q 'ros-noetic-xgc2-robot-visualization (>= 0.1.0-14)' .xgc2/scripts/package_debs.sh
+grep -Fq 'copy_required_path "${PREFIX_ROOT}/lib/libgazebo_scene_contract.so"' \
+  .xgc2/scripts/package_debs.sh
+grep -Fq 'test -f "${SCENE_CONTRACT_LIBRARY}"' \
+  .xgc2/scripts/check_installed_packages.sh
+grep -Fq 'ros-noetic-xgc2-robot-visualization (>= 0.1.0-15)' \
+  .xgc2/scripts/package_debs.sh
+grep -Fq -- '- ros-noetic-xgc2-robot-visualization (>= 0.1.0-15)' \
+  .xgc2/product.yml
+grep -Fq 'XGC2_ROBOT_VISUALIZATION_MINIMUM_VERSION="0.1.0-15"' \
+  .xgc2/dependencies/xgc2-robot-visualization.env
+grep -Fq 'XGC2_ROBOT_VISUALIZATION_STANDALONE_SOURCE_REF="e7fe8b6b6299d0de5f331b5b876d52ed872551dd"' \
+  .xgc2/dependencies/xgc2-robot-visualization.env
+grep -Fq 'test -x "${description_publisher_path}"' \
+  .xgc2/scripts/install_robot_visualization_dependency.sh
 grep -Fq 'XGC2_ROBOT_VISUALIZATION_STANDALONE_SOURCE_REF' \
   .xgc2/scripts/install_robot_visualization_dependency.sh
 grep -Fq 'apt-cache policy "${package_name}"' \

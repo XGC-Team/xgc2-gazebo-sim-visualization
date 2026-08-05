@@ -5,6 +5,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dependency_lock="${script_dir}/../dependencies/xgc2-robot-visualization.env"
 package_name="ros-noetic-xgc2-robot-visualization"
 header_path="/opt/ros/noetic/include/xgc2_robot_visualization/mecanum_ugv_visualizer.hpp"
+description_publisher_path="/opt/ros/noetic/lib/xgc2_robot_visualization/xgc2_robot_description_publisher_node"
 
 if [[ ! -f "${dependency_lock}" ]]; then
   echo "missing robot visualization dependency lock: ${dependency_lock}" >&2
@@ -81,7 +82,8 @@ if [[ "${installed_version}" != "${selected_version}" ]]; then
   exit 1
 fi
 if ! dpkg --compare-versions "${installed_version}" ge "${XGC2_ROBOT_VISUALIZATION_MINIMUM_VERSION}"; then
-  echo "installed ${package_name} ${installed_version} lacks the Mecanum visualization capability" >&2
+  echo "installed ${package_name} ${installed_version} lacks the required visualization runtime capability" >&2
   exit 1
 fi
 test -f "${header_path}"
+test -x "${description_publisher_path}"
