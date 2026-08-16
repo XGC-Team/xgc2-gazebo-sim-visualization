@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-DOCKER_IMAGE="${DOCKER_IMAGE:-ros:noetic-ros-base-focal}"
+DOCKER_IMAGE="${DOCKER_IMAGE:-ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-full-noetic:1.0.0}"
 WORK_DIR="${WORK_DIR:-${REPO_ROOT}/.work/docker}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}/debs}"
 INSTALL_CHECK="${INSTALL_CHECK:-true}"
@@ -49,8 +49,6 @@ docker run --rm \
     set -euo pipefail
 
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update
-    apt-get install -y --no-install-recommends ca-certificates
     echo "deb [trusted=yes arch=$(dpkg --print-architecture)] https://xgc2.apt.xiaokang.ink focal main" \
       > /etc/apt/sources.list.d/xgc2.list
 
@@ -60,28 +58,6 @@ docker run --rm \
           > /etc/apt/sources.list.d/00-xgc2-release-train.list
       fi
     apt-get update
-    apt-get install -y --no-install-recommends \
-      build-essential \
-      cmake \
-      dpkg-dev \
-      fakeroot \
-      file \
-      git \
-      rsync \
-      ros-noetic-foxglove-msgs \
-      ros-noetic-gazebo-msgs \
-      ros-noetic-geometry-msgs \
-      ros-noetic-mavros-msgs \
-      ros-noetic-robot-state-publisher \
-      ros-noetic-roscpp \
-      ros-noetic-roslaunch \
-      ros-noetic-rospack \
-      ros-noetic-rviz \
-      ros-noetic-sensor-msgs \
-      ros-noetic-std-msgs \
-      ros-noetic-tf2-ros \
-      ros-noetic-visualization-msgs
-
     /workspace/repo/.xgc2/scripts/install_robot_visualization_dependency.sh
 
     rm -rf /workspace/work/src /workspace/work/build /workspace/work/devel /workspace/work/install-root
