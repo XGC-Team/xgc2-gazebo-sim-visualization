@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <geometry_msgs/Pose.h>
 #include <gtest/gtest.h>
 #include <ros/serialization.h>
 #include <visualization_msgs/Marker.h>
@@ -165,8 +166,8 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
     }
 
     foxglove_msgs::SceneUpdate path_update;
-    appendSceneEntityPart(RobotModelKind::kFs150, "uav1", SceneEntityPart::kPath, markers, 0U, ros::Time(42, 0), "world",
-                          blackLabelStyle(), &path_update);
+    appendSceneEntityPart(RobotModelKind::kFs150, "uav1", SceneEntityPart::kPath, markers, 0U, ros::Time(42, 0),
+                          "world", blackLabelStyle(), &path_update);
     ASSERT_EQ(path_update.entities.size(), 1U);
     EXPECT_EQ(path_update.entities[0].id, "xgc2/px4/uav1/path");
     EXPECT_EQ(path_update.entities[0].lines.size(), 1U);
@@ -294,9 +295,93 @@ TEST(SceneContract, EntityIDsRemainKindScoped) {
     EXPECT_EQ(sceneEntityID(RobotModelKind::kMecanum, "ugv1"), "xgc2/mecanum/ugv1");
     EXPECT_EQ(sceneEntityPartID(RobotModelKind::kFs150, "uav1", SceneEntityPart::kPath), "xgc2/px4/uav1/path");
     EXPECT_EQ(sceneEntityPartID(RobotModelKind::kScout, "ugv1", SceneEntityPart::kPath), "xgc2/scout/ugv1/path");
-    EXPECT_EQ(sceneEntityPartID(RobotModelKind::kMecanum, "ugv1", SceneEntityPart::kPath),
-              "xgc2/mecanum/ugv1/path");
+    EXPECT_EQ(sceneEntityPartID(RobotModelKind::kMecanum, "ugv1", SceneEntityPart::kPath), "xgc2/mecanum/ugv1/path");
     EXPECT_THROW(sceneEntityID(RobotModelKind::kNone, "unknown"), std::invalid_argument);
+}
+
+TEST(SceneContract, HistoricalPathNamespaceIsSharedAcrossKinds) {
+    const RobotModelKind kinds[] = {RobotModelKind::kFs150, RobotModelKind::kScout, RobotModelKind::kMecanum};
+    const char* names[] = {"uav1", "ugv1", "ugv2"};
+    const char* ids[] = {"xgc2/px4/uav1/path", "xgc2/scout/ugv1/path", "xgc2/mecanum/ugv2/path"};
+    for (std::size_t index = 0U; index < 3U; ++index) {
+        visualization_msgs::Marker path;
+        path.type = visualization_msgs::Marker::LINE_STRIP;
+        path.ns = std::string(names[index]) + "_actual_path";
+        path.pose.position.z = 0.18;
+        path.pose.orientation.w = 1.0;
+        path.scale.x = 0.02;
+        geometry_msgs::Point point;
+        point.z = 0.18;
+        path.points.push_back(point);
+        visualization_msgs::MarkerArray markers;
+        markers.markers.push_back(path);
+        foxglove_msgs::SceneUpdate update;
+        appendSceneEntityPart(kinds[index], names[index], SceneEntityPart::kPath, markers, 0U, ros::Time(42, 0),
+                              "world", blackLabelStyle(), &update);
+        ASSERT_EQ(update.entities.size(), 1U);
+        EXPECT_EQ(update.entities[0].id, ids[index]);
+        EXPECT_EQ(update.entities[0].frame_id, "world");
+        ASSERT_EQ(update.entities[0].lines.size(), 1U);
+        EXPECT_DOUBLE_EQ(update.entities[0].lines[0].pose.position.z, 0.18);
+        EXPECT_DOUBLE_EQ(update.entities[0].lines[0].points[0].z, 0.18);
+    }
+}
+
+TEST(WorldEnuPose, SelectRequiresWorldFrameAndIgnoresMap) {
+    const ros::Time now(10, 0);
+    WorldEnuPoseSource gazebo;
+    gazebo.available = true;
+    gazebo.pose.position.x = 1.25;
+    gazebo.pose.position.z = 0.15;
+    gazebo.pose.orientation.w = 1.0;
+    gazebo.frame_id = "world";
+
+    WorldEnuPoseSource map_pose;
+    map_pose.available = true;
+    map_pose.pose.position.z = -2.0;
+    map_pose.pose.orientation.w = 1.0;
+    map_pose.stamp = now;
+    map_pose.frame_id = "map";
+
+    const WorldEnuPoseSelection selected = selectWorldEnuPose(map_pose, gazebo, now, 0.5);
+    ASSERT_TRUE(selected.found);
+    EXPECT_STREQ(selected.source, "gazebo");
+    EXPECT_DOUBLE_EQ(selected.pose.position.z, 0.15);
+
+    WorldEnuPoseSource vrpn_world = gazebo;
+    vrpn_world.pose.position.z = 0.16;
+    vrpn_world.stamp = now;
+    vrpn_world.frame_id = "world";
+    const WorldEnuPoseSelection from_vrpn = selectWorldEnuPose(vrpn_world, gazebo, now, 0.5);
+    ASSERT_TRUE(from_vrpn.found);
+    EXPECT_STREQ(from_vrpn.source, "vrpn");
+    EXPECT_DOUBLE_EQ(from_vrpn.pose.position.z, 0.16);
+
+    WorldEnuPoseSource missing;
+    EXPECT_FALSE(selectWorldEnuPose(missing, missing, now, 0.5).found);
+    EXPECT_FALSE(isWorldFixedFrame("map"));
+    EXPECT_FALSE(isWorldFixedFrame("odom"));
+    EXPECT_TRUE(isWorldFixedFrame("/world"));
+
+    WorldEnuPoseSource zero_stamp_vrpn = vrpn_world;
+    zero_stamp_vrpn.stamp = ros::Time();
+    zero_stamp_vrpn.pose.position.z = 9.0;
+    const WorldEnuPoseSelection ignore_zero = selectWorldEnuPose(zero_stamp_vrpn, gazebo, now, 0.5);
+    ASSERT_TRUE(ignore_zero.found);
+    EXPECT_STREQ(ignore_zero.source, "gazebo");
+    EXPECT_DOUBLE_EQ(ignore_zero.pose.position.z, 0.15);
+}
+
+TEST(WorldFixedFrameRoot, AdvertisesParentOnTfWithoutMovingDisplays) {
+    const ros::Time now(10, 0);
+    const geometry_msgs::TransformStamped root = worldFixedFrameRoot("world", now);
+    EXPECT_EQ(root.header.frame_id, "world");
+    EXPECT_EQ(root.child_frame_id, kWorldFixedFrameRootChild);
+    EXPECT_EQ(root.header.stamp, now);
+    EXPECT_DOUBLE_EQ(root.transform.translation.x, 0.0);
+    EXPECT_DOUBLE_EQ(root.transform.translation.y, 0.0);
+    EXPECT_DOUBLE_EQ(root.transform.translation.z, 0.0);
+    EXPECT_DOUBLE_EQ(root.transform.rotation.w, 1.0);
 }
 
 } // namespace

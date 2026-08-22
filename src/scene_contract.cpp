@@ -15,6 +15,7 @@
 #include <foxglove_msgs/TextPrimitive.h>
 #include <geometry_msgs/Pose.h>
 #include <geometry_msgs/Quaternion.h>
+#include <geometry_msgs/TransformStamped.h>
 #include <std_msgs/ColorRGBA.h>
 #include <visualization_msgs/Marker.h>
 
@@ -127,10 +128,8 @@ std::set<std::string> parseModelNames(const std::string& csv) {
 }
 
 bool modelListsAreDisjoint(const std::set<std::string>& legacy_uav_models,
-                           const std::set<std::string>& legacy_ugv_models,
-                           const std::set<std::string>& fs150_models,
-                           const std::set<std::string>& scout_models,
-                           const std::set<std::string>& mecanum_models) {
+                           const std::set<std::string>& legacy_ugv_models, const std::set<std::string>& fs150_models,
+                           const std::set<std::string>& scout_models, const std::set<std::string>& mecanum_models) {
     std::set<std::string> seen;
     for (const std::set<std::string>* models :
          {&legacy_uav_models, &legacy_ugv_models, &fs150_models, &scout_models, &mecanum_models}) {
@@ -145,8 +144,8 @@ bool modelListsAreDisjoint(const std::set<std::string>& legacy_uav_models,
 
 RobotModelKind selectRobotModelKind(const std::string& model_name, const std::set<std::string>& configured_fs150_models,
                                     const std::set<std::string>& configured_scout_models,
-                                    const std::set<std::string>& configured_mecanum_models,
-                                    bool allow_auto_discovery, bool track_ugv) {
+                                    const std::set<std::string>& configured_mecanum_models, bool allow_auto_discovery,
+                                    bool track_ugv) {
     const bool configured_fs150 = configured_fs150_models.count(model_name) != 0U;
     const bool configured_scout = configured_scout_models.count(model_name) != 0U;
     const bool configured_mecanum = configured_mecanum_models.count(model_name) != 0U;
@@ -225,14 +224,13 @@ bool takeRateGate(const ros::Time& now, double rate, bool* initialized, ros::Tim
     return true;
 }
 
-}  // namespace
+} // namespace
 
 bool SceneUpdateCadence::takeGate(const ros::Time& now, double rate, bool* initialized, ros::Time* last_stamp) {
     return takeRateGate(now, rate, initialized, last_stamp);
 }
 
-PublishCadence::PublishCadence(double publish_rate)
-    : publish_rate_(publish_rate > 0.0 ? publish_rate : 1.0) {}
+PublishCadence::PublishCadence(double publish_rate) : publish_rate_(publish_rate > 0.0 ? publish_rate : 1.0) {}
 
 bool PublishCadence::take(const ros::Time& now) {
     return takeRateGate(now, publish_rate_, &initialized_, &last_stamp_);
@@ -352,10 +350,77 @@ void appendSceneEntity(RobotModelKind kind, const std::string& model_name,
 
 void appendSceneEntityPart(RobotModelKind kind, const std::string& model_name, SceneEntityPart part,
                            const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
-                           const ros::Time& timestamp, const std::string& frame_id,
-                           const SceneLabelStyle& label_style, foxglove_msgs::SceneUpdate* update) {
+                           const ros::Time& timestamp, const std::string& frame_id, const SceneLabelStyle& label_style,
+                           foxglove_msgs::SceneUpdate* update) {
     appendSceneEntityImpl(kind, sceneEntityPartID(kind, model_name, part), markers, first_marker, timestamp, frame_id,
                           &part, label_style, update);
+}
+
+namespace {
+
+std::string normalizedFrameLabel(const std::string& frame_id) {
+    std::string normalized;
+    normalized.reserve(frame_id.size());
+    for (unsigned char character : frame_id) {
+        if (character == ' ' || character == '\t' || character == '\r' || character == '\n') {
+            continue;
+        }
+        normalized.push_back(static_cast<char>(std::tolower(character)));
+    }
+    if (!normalized.empty() && normalized.front() == '/') {
+        normalized.erase(normalized.begin());
+    }
+    const std::size_t slash = normalized.rfind('/');
+    if (slash != std::string::npos && slash + 1 < normalized.size()) {
+        normalized = normalized.substr(slash + 1);
+    }
+    return normalized;
+}
+
+bool isFreshWorldSource(const WorldEnuPoseSource& source, const ros::Time& now, double timeout_sec) {
+    if (!source.available) {
+        return false;
+    }
+    if (timeout_sec <= 0.0) {
+        return true;
+    }
+    if (source.stamp.isZero()) {
+        return false;
+    }
+    return now - source.stamp <= ros::Duration(timeout_sec);
+}
+
+} // namespace
+
+bool isWorldFixedFrame(const std::string& frame_id) {
+    return normalizedFrameLabel(frame_id) == "world";
+}
+
+WorldEnuPoseSelection selectWorldEnuPose(const WorldEnuPoseSource& vrpn, const WorldEnuPoseSource& gazebo,
+                                         const ros::Time& now, double vrpn_timeout_sec) {
+    WorldEnuPoseSelection selected;
+    if (isFreshWorldSource(vrpn, now, vrpn_timeout_sec) && isWorldFixedFrame(vrpn.frame_id)) {
+        selected.found = true;
+        selected.pose = vrpn.pose;
+        selected.source = "vrpn";
+        return selected;
+    }
+    if (gazebo.available && isWorldFixedFrame(gazebo.frame_id)) {
+        selected.found = true;
+        selected.pose = gazebo.pose;
+        selected.source = "gazebo";
+        return selected;
+    }
+    return selected;
+}
+
+geometry_msgs::TransformStamped worldFixedFrameRoot(const std::string& frame_id, const ros::Time& stamp) {
+    geometry_msgs::TransformStamped origin;
+    origin.header.stamp = stamp;
+    origin.header.frame_id = frame_id;
+    origin.child_frame_id = kWorldFixedFrameRootChild;
+    origin.transform.rotation.w = 1.0;
+    return origin;
 }
 
 } // namespace gazebo_sim_visualization

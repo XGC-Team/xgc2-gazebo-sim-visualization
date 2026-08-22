@@ -6,6 +6,8 @@
 
 #include <foxglove_msgs/Color.h>
 #include <foxglove_msgs/SceneUpdate.h>
+#include <geometry_msgs/Pose.h>
+#include <geometry_msgs/TransformStamped.h>
 #include <ros/time.h>
 #include <visualization_msgs/MarkerArray.h>
 
@@ -78,15 +80,13 @@ class SceneUpdateCadence {
 std::set<std::string> parseModelNames(const std::string& csv);
 
 bool modelListsAreDisjoint(const std::set<std::string>& legacy_uav_models,
-                           const std::set<std::string>& legacy_ugv_models,
-                           const std::set<std::string>& fs150_models,
-                           const std::set<std::string>& scout_models,
-                           const std::set<std::string>& mecanum_models);
+                           const std::set<std::string>& legacy_ugv_models, const std::set<std::string>& fs150_models,
+                           const std::set<std::string>& scout_models, const std::set<std::string>& mecanum_models);
 
 RobotModelKind selectRobotModelKind(const std::string& model_name, const std::set<std::string>& configured_fs150_models,
                                     const std::set<std::string>& configured_scout_models,
-                                    const std::set<std::string>& configured_mecanum_models,
-                                    bool allow_auto_discovery, bool track_ugv);
+                                    const std::set<std::string>& configured_mecanum_models, bool allow_auto_discovery,
+                                    bool track_ugv);
 
 std::string sceneEntityID(RobotModelKind kind, const std::string& model_name);
 
@@ -99,7 +99,34 @@ void appendSceneEntity(RobotModelKind kind, const std::string& model_name,
 
 void appendSceneEntityPart(RobotModelKind kind, const std::string& model_name, SceneEntityPart part,
                            const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
-                           const ros::Time& timestamp, const std::string& frame_id,
-                           const SceneLabelStyle& label_style, foxglove_msgs::SceneUpdate* update);
+                           const ros::Time& timestamp, const std::string& frame_id, const SceneLabelStyle& label_style,
+                           foxglove_msgs::SceneUpdate* update);
+
+// Body/path poses come only from sources already in the product Fixed Frame
+// (world ENU z-up). map/odom/NED are not converted here.
+bool isWorldFixedFrame(const std::string& frame_id);
+
+struct WorldEnuPoseSource {
+    bool available{false};
+    geometry_msgs::Pose pose;
+    ros::Time stamp;
+    std::string frame_id;
+};
+
+struct WorldEnuPoseSelection {
+    bool found{false};
+    geometry_msgs::Pose pose;
+    const char* source{""};
+};
+
+// VRPN (mocap, header.frame_id == world) then Gazebo model pose in world.
+// MAVROS local_position is not a source.
+WorldEnuPoseSelection selectWorldEnuPose(const WorldEnuPoseSource& vrpn, const WorldEnuPoseSource& gazebo,
+                                         const ros::Time& now, double vrpn_timeout_sec);
+
+// Identity child of the Fixed Frame published on /tf so RViz's Fixed Frame
+// (the parent) exists in the TF tree. Displays consume the parent, not the child.
+constexpr const char* kWorldFixedFrameRootChild = "xgc_origin";
+geometry_msgs::TransformStamped worldFixedFrameRoot(const std::string& frame_id, const ros::Time& stamp);
 
 } // namespace gazebo_sim_visualization
