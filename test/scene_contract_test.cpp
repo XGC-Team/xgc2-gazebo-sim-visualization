@@ -334,6 +334,7 @@ TEST(WorldEnuPose, SelectRequiresWorldFrameAndIgnoresMap) {
     gazebo.pose.position.x = 1.25;
     gazebo.pose.position.z = 0.15;
     gazebo.pose.orientation.w = 1.0;
+    gazebo.stamp = ros::Time(9, 900000000);
     gazebo.frame_id = "world";
 
     WorldEnuPoseSource map_pose;
@@ -343,22 +344,28 @@ TEST(WorldEnuPose, SelectRequiresWorldFrameAndIgnoresMap) {
     map_pose.stamp = now;
     map_pose.frame_id = "map";
 
-    const WorldEnuPoseSelection selected = selectWorldEnuPose(map_pose, gazebo, now, 0.5);
+    const WorldEnuPoseSelection selected = selectWorldEnuPose(map_pose, gazebo, WorldEnuPoseSource{},
+                                                               WorldEnuPoseSource{}, now, 0.5, 0.5, 0.5);
     ASSERT_TRUE(selected.found);
     EXPECT_STREQ(selected.source, "gazebo");
+    EXPECT_EQ(selected.stamp, gazebo.stamp);
+    EXPECT_EQ(selected.frame_id, "world");
     EXPECT_DOUBLE_EQ(selected.pose.position.z, 0.15);
 
     WorldEnuPoseSource vrpn_world = gazebo;
     vrpn_world.pose.position.z = 0.16;
     vrpn_world.stamp = now;
     vrpn_world.frame_id = "world";
-    const WorldEnuPoseSelection from_vrpn = selectWorldEnuPose(vrpn_world, gazebo, now, 0.5);
+    const WorldEnuPoseSelection from_vrpn = selectWorldEnuPose(vrpn_world, gazebo, WorldEnuPoseSource{},
+                                                                WorldEnuPoseSource{}, now, 0.5, 0.5, 0.5);
     ASSERT_TRUE(from_vrpn.found);
     EXPECT_STREQ(from_vrpn.source, "vrpn");
+    EXPECT_EQ(from_vrpn.stamp, now);
+    EXPECT_EQ(from_vrpn.frame_id, "world");
     EXPECT_DOUBLE_EQ(from_vrpn.pose.position.z, 0.16);
 
     WorldEnuPoseSource missing;
-    EXPECT_FALSE(selectWorldEnuPose(missing, missing, now, 0.5).found);
+    EXPECT_FALSE(selectWorldEnuPose(missing, missing, missing, missing, now, 0.5, 0.5, 0.5).found);
     EXPECT_FALSE(isWorldFixedFrame("map"));
     EXPECT_FALSE(isWorldFixedFrame("odom"));
     EXPECT_TRUE(isWorldFixedFrame("/world"));
@@ -366,10 +373,30 @@ TEST(WorldEnuPose, SelectRequiresWorldFrameAndIgnoresMap) {
     WorldEnuPoseSource zero_stamp_vrpn = vrpn_world;
     zero_stamp_vrpn.stamp = ros::Time();
     zero_stamp_vrpn.pose.position.z = 9.0;
-    const WorldEnuPoseSelection ignore_zero = selectWorldEnuPose(zero_stamp_vrpn, gazebo, now, 0.5);
+    const WorldEnuPoseSelection ignore_zero = selectWorldEnuPose(zero_stamp_vrpn, gazebo, missing, missing,
+                                                                  now, 0.5, 0.5, 0.5);
     ASSERT_TRUE(ignore_zero.found);
     EXPECT_STREQ(ignore_zero.source, "gazebo");
     EXPECT_DOUBLE_EQ(ignore_zero.pose.position.z, 0.15);
+
+    WorldEnuPoseSource no_gazebo;
+    WorldEnuPoseSource local_world = vrpn_world;
+    local_world.pose.position.z = 4.25;
+    const WorldEnuPoseSelection from_local = selectWorldEnuPose(missing, no_gazebo, local_world, missing,
+                                                                 now, 0.5, 0.5, 0.5);
+    ASSERT_TRUE(from_local.found);
+    EXPECT_STREQ(from_local.source, "local-pose");
+    EXPECT_EQ(from_local.stamp, now);
+    EXPECT_DOUBLE_EQ(from_local.pose.position.z, 4.25);
+
+    WorldEnuPoseSource tf_world = local_world;
+    tf_world.pose.position.z = 5.5;
+    const WorldEnuPoseSelection from_tf = selectWorldEnuPose(missing, no_gazebo, missing, tf_world,
+                                                              now, 0.5, 0.5, 0.5);
+    ASSERT_TRUE(from_tf.found);
+    EXPECT_STREQ(from_tf.source, "tf");
+    EXPECT_EQ(from_tf.stamp, now);
+    EXPECT_DOUBLE_EQ(from_tf.pose.position.z, 5.5);
 }
 
 TEST(WorldFixedFrameRoot, AdvertisesParentOnTfWithoutMovingDisplays) {

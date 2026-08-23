@@ -8,9 +8,11 @@ find_package(catkin REQUIRED COMPONENTS
   gazebo_msgs
   geometry_msgs
   mavros_msgs
+  nav_msgs
   roscpp
   std_msgs
   tf2_ros
+  tf2_geometry_msgs
   visualization_msgs
   xgc2_robot_visualization
 )
@@ -18,7 +20,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES gazebo_scene_contract
-  CATKIN_DEPENDS foxglove_msgs gazebo_msgs geometry_msgs mavros_msgs roscpp std_msgs tf2_ros visualization_msgs xgc2_robot_visualization
+  CATKIN_DEPENDS foxglove_msgs gazebo_msgs geometry_msgs mavros_msgs nav_msgs roscpp std_msgs tf2_geometry_msgs tf2_ros visualization_msgs xgc2_robot_visualization
 )
 
 # xgc2_robot_visualization is checked out beside this package and also exists in

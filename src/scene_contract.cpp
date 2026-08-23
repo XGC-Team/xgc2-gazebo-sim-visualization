@@ -397,18 +397,40 @@ bool isWorldFixedFrame(const std::string& frame_id) {
 }
 
 WorldEnuPoseSelection selectWorldEnuPose(const WorldEnuPoseSource& vrpn, const WorldEnuPoseSource& gazebo,
-                                         const ros::Time& now, double vrpn_timeout_sec) {
+                                         const WorldEnuPoseSource& local_pose, const WorldEnuPoseSource& tf_pose,
+                                         const ros::Time& now, double vrpn_timeout_sec,
+                                         double local_pose_timeout_sec, double tf_pose_timeout_sec) {
     WorldEnuPoseSelection selected;
     if (isFreshWorldSource(vrpn, now, vrpn_timeout_sec) && isWorldFixedFrame(vrpn.frame_id)) {
         selected.found = true;
         selected.pose = vrpn.pose;
+        selected.stamp = vrpn.stamp;
+        selected.frame_id = vrpn.frame_id;
         selected.source = "vrpn";
         return selected;
     }
     if (gazebo.available && isWorldFixedFrame(gazebo.frame_id)) {
         selected.found = true;
         selected.pose = gazebo.pose;
+        selected.stamp = gazebo.stamp;
+        selected.frame_id = gazebo.frame_id;
         selected.source = "gazebo";
+        return selected;
+    }
+    if (isFreshWorldSource(local_pose, now, local_pose_timeout_sec) && isWorldFixedFrame(local_pose.frame_id)) {
+        selected.found = true;
+        selected.pose = local_pose.pose;
+        selected.stamp = local_pose.stamp;
+        selected.frame_id = local_pose.frame_id;
+        selected.source = "local-pose";
+        return selected;
+    }
+    if (isFreshWorldSource(tf_pose, now, tf_pose_timeout_sec) && isWorldFixedFrame(tf_pose.frame_id)) {
+        selected.found = true;
+        selected.pose = tf_pose.pose;
+        selected.stamp = tf_pose.stamp;
+        selected.frame_id = tf_pose.frame_id;
+        selected.source = "tf";
         return selected;
     }
     return selected;

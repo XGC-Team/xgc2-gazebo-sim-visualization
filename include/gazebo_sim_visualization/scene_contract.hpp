@@ -116,13 +116,18 @@ struct WorldEnuPoseSource {
 struct WorldEnuPoseSelection {
     bool found{false};
     geometry_msgs::Pose pose;
+    ros::Time stamp;
+    std::string frame_id;
     const char* source{""};
 };
 
-// VRPN (mocap, header.frame_id == world) then Gazebo model pose in world.
-// MAVROS local_position is not a source.
+// Priority is world-frame VRPN, Gazebo truth, a local pose transformed through
+// TF, then an adapter-owned world TF. Every selected source retains its own
+// timestamp and already has world ENU semantics.
 WorldEnuPoseSelection selectWorldEnuPose(const WorldEnuPoseSource& vrpn, const WorldEnuPoseSource& gazebo,
-                                         const ros::Time& now, double vrpn_timeout_sec);
+                                         const WorldEnuPoseSource& local_pose, const WorldEnuPoseSource& tf_pose,
+                                         const ros::Time& now, double vrpn_timeout_sec,
+                                         double local_pose_timeout_sec, double tf_pose_timeout_sec);
 
 // Identity child of the Fixed Frame published on /tf so RViz's Fixed Frame
 // (the parent) exists in the TF tree. Displays consume the parent, not the child.
