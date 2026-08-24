@@ -134,4 +134,9 @@ WorldEnuPoseSelection selectWorldEnuPose(const WorldEnuPoseSource& vrpn, const W
 constexpr const char* kWorldFixedFrameRootChild = "xgc_origin";
 geometry_msgs::TransformStamped worldFixedFrameRoot(const std::string& frame_id, const ros::Time& stamp);
 
+// Runtime readiness is a whole frozen-roster fact. A reset SceneUpdate or the
+// first Robot pose must not make a multi-Robot viewer ready while siblings are
+// still absent from its transform and Path trees.
+bool frozenVisualizationRosterReady(std::size_t tracked_models, std::size_t world_poses);
+
 } // namespace gazebo_sim_visualization

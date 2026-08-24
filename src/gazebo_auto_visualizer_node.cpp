@@ -33,6 +33,7 @@
 #include <nav_msgs/Path.h>
 #include <nav_msgs/Odometry.h>
 #include <ros/ros.h>
+#include <std_msgs/Empty.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_msgs/TFMessage.h>
 #include <tf2_ros/buffer.h>
@@ -230,6 +231,7 @@ class GazeboAutoVisualizer {
             ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kMecanum);
         }
         configurePathPublishers();
+        scene_ready_pub_ = nh_.advertise<std_msgs::Empty>("/xgc/robot_scene/ready", 1, true);
 
         if (publish_markers_) {
             marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("markers", 1);
@@ -727,12 +729,14 @@ class GazeboAutoVisualizer {
         visualization_msgs::MarkerArray markers;
         std::vector<geometry_msgs::TransformStamped> transforms;
         foxglove_msgs::SceneUpdate scene_update;
+        std::size_t world_pose_count = 0U;
         for (auto& entry : models_) {
             TrackedModel& model = entry.second;
             const gazebo_sim_visualization::WorldEnuPoseSelection world_pose = selectWorldPose(model, now);
             if (!world_pose.found) {
                 continue;
             }
+            ++world_pose_count;
             publishPath(model, world_pose);
             const geometry_msgs::Pose* pose = &world_pose.pose;
             const std::size_t first_marker = markers.markers.size();
@@ -801,6 +805,13 @@ class GazeboAutoVisualizer {
         if (publish_scene_update_ && !scene_update.entities.empty()) {
             scene_update_pub_.publish(scene_update);
         }
+        if (!scene_ready_published_ && publish_transforms_ && publish_paths_ &&
+            gazebo_sim_visualization::frozenVisualizationRosterReady(models_.size(), world_pose_count)) {
+            scene_ready_pub_.publish(std_msgs::Empty());
+            scene_ready_published_ = true;
+            ROS_INFO_STREAM("published frozen visualization readiness for " << world_pose_count
+                                                                             << " Robot(s)");
+        }
     }
 
     ros::NodeHandle nh_;
@@ -809,6 +820,7 @@ class GazeboAutoVisualizer {
     tf2_ros::TransformListener tf_listener_;
     ros::Publisher marker_pub_;
     ros::Publisher scene_update_pub_;
+    ros::Publisher scene_ready_pub_;
     ros::Subscriber model_states_sub_;
     ros::Timer publish_timer_;
     // Deliberately not tf2_ros::TransformBroadcaster: that publishes to the
@@ -877,6 +889,7 @@ class GazeboAutoVisualizer {
     bool publish_scene_update_{false};
     bool publish_scene_paths_{true};
     bool publish_paths_{false};
+    bool scene_ready_published_{false};
 };
 
 int main(int argc, char** argv) {

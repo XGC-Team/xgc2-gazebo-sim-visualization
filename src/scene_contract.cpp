@@ -445,4 +445,8 @@ geometry_msgs::TransformStamped worldFixedFrameRoot(const std::string& frame_id,
     return origin;
 }
 
+bool frozenVisualizationRosterReady(std::size_t tracked_models, std::size_t world_poses) {
+    return tracked_models > 0U && world_poses == tracked_models;
+}
+
 } // namespace gazebo_sim_visualization
