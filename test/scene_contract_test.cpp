@@ -75,17 +75,19 @@ TEST(SceneContract, ImmutableListsSelectOnlyConfiguredModels) {
     const std::set<std::string> scouts{"ugv1"};
     const std::set<std::string> mecanums{"ugv2"};
 
-    EXPECT_EQ(selectRobotModelKind("uav1", fs150s, scouts, mecanums, false, true), RobotModelKind::kFs150);
-    EXPECT_EQ(selectRobotModelKind("ugv1", fs150s, scouts, mecanums, false, true), RobotModelKind::kScout);
-    EXPECT_EQ(selectRobotModelKind("ugv2", fs150s, scouts, mecanums, false, true), RobotModelKind::kMecanum);
-    EXPECT_EQ(selectRobotModelKind("uav9", fs150s, scouts, mecanums, false, true), RobotModelKind::kNone);
-    EXPECT_EQ(selectRobotModelKind("ugv9", fs150s, scouts, mecanums, false, true), RobotModelKind::kNone);
-    EXPECT_EQ(selectRobotModelKind("ground_plane", fs150s, scouts, mecanums, false, true), RobotModelKind::kNone);
+    EXPECT_EQ(selectRobotModelKind("uav1", fs150s, scouts, mecanums, true), RobotModelKind::kFs150);
+    EXPECT_EQ(selectRobotModelKind("ugv1", fs150s, scouts, mecanums, true), RobotModelKind::kScout);
+    EXPECT_EQ(selectRobotModelKind("ugv2", fs150s, scouts, mecanums, true), RobotModelKind::kMecanum);
+    EXPECT_EQ(selectRobotModelKind("uav9", fs150s, scouts, mecanums, true), RobotModelKind::kNone);
+    EXPECT_EQ(selectRobotModelKind("ugv9", fs150s, scouts, mecanums, true), RobotModelKind::kNone);
+    EXPECT_EQ(selectRobotModelKind("ground_plane", fs150s, scouts, mecanums, true), RobotModelKind::kNone);
+    EXPECT_EQ(selectRobotModelKind("uav1", fs150s, scouts, mecanums, false), RobotModelKind::kFs150);
+    EXPECT_EQ(selectRobotModelKind("ugv1", fs150s, scouts, mecanums, false), RobotModelKind::kNone);
 }
 
 TEST(SceneContract, ModelListsMustBeDisjoint) {
-    EXPECT_TRUE(modelListsAreDisjoint({}, {}, {"uav1"}, {"ugv1"}, {"ugv2"}));
-    EXPECT_FALSE(modelListsAreDisjoint({"shared"}, {}, {"uav1"}, {"ugv1"}, {"shared"}));
+    EXPECT_TRUE(modelListsAreDisjoint({"uav1"}, {"ugv1"}, {"ugv2"}));
+    EXPECT_FALSE(modelListsAreDisjoint({"shared"}, {"ugv1"}, {"shared"}));
 }
 
 TEST(SceneContract, ScoutMarkersBecomeScoutSceneEntity) {
@@ -380,76 +382,52 @@ TEST(SceneContract, HistoricalPathNamespaceIsSharedAcrossKinds) {
     }
 }
 
-TEST(WorldEnuPose, SelectRequiresWorldFrameAndIgnoresMap) {
+TEST(CanonicalWorldPose, AcceptsOnlyTheSlotCanonicalWorldSample) {
     const ros::Time now(10, 0);
-    WorldEnuPoseSource gazebo;
-    gazebo.available = true;
-    gazebo.pose.position.x = 1.25;
-    gazebo.pose.position.z = 0.15;
-    gazebo.pose.orientation.w = 1.0;
-    gazebo.stamp = ros::Time(9, 900000000);
-    gazebo.frame_id = "world";
+    CanonicalPoseSample pose;
+    pose.available = true;
+    pose.pose.position.x = 1.25;
+    pose.pose.position.z = 0.16;
+    pose.pose.orientation.w = 1.0;
+    pose.stamp = now;
+    pose.frame_id = "world";
 
-    WorldEnuPoseSource map_pose;
-    map_pose.available = true;
-    map_pose.pose.position.z = -2.0;
-    map_pose.pose.orientation.w = 1.0;
-    map_pose.stamp = now;
-    map_pose.frame_id = "map";
-
-    const WorldEnuPoseSelection selected = selectWorldEnuPose(map_pose, gazebo, WorldEnuPoseSource{},
-                                                               WorldEnuPoseSource{}, now, 0.5, 0.5, 0.5);
+    const CanonicalWorldPose selected = selectCanonicalWorldPose(pose, now, 0.5);
     ASSERT_TRUE(selected.found);
-    EXPECT_STREQ(selected.source, "gazebo");
-    EXPECT_EQ(selected.stamp, gazebo.stamp);
+    EXPECT_EQ(selected.stamp, now);
     EXPECT_EQ(selected.frame_id, "world");
-    EXPECT_DOUBLE_EQ(selected.pose.position.z, 0.15);
+    EXPECT_DOUBLE_EQ(selected.pose.position.z, 0.16);
 
-    WorldEnuPoseSource vrpn_world = gazebo;
-    vrpn_world.pose.position.z = 0.16;
-    vrpn_world.stamp = now;
-    vrpn_world.frame_id = "world";
-    const WorldEnuPoseSelection from_vrpn = selectWorldEnuPose(vrpn_world, gazebo, WorldEnuPoseSource{},
-                                                                WorldEnuPoseSource{}, now, 0.5, 0.5, 0.5);
-    ASSERT_TRUE(from_vrpn.found);
-    EXPECT_STREQ(from_vrpn.source, "vrpn");
-    EXPECT_EQ(from_vrpn.stamp, now);
-    EXPECT_EQ(from_vrpn.frame_id, "world");
-    EXPECT_DOUBLE_EQ(from_vrpn.pose.position.z, 0.16);
+    CanonicalPoseSample map_pose = pose;
+    map_pose.frame_id = "map";
+    EXPECT_FALSE(selectCanonicalWorldPose(map_pose, now, 0.5).found);
 
-    WorldEnuPoseSource missing;
-    EXPECT_FALSE(selectWorldEnuPose(missing, missing, missing, missing, now, 0.5, 0.5, 0.5).found);
+    CanonicalPoseSample odom_pose = pose;
+    odom_pose.frame_id = "odom";
+    EXPECT_FALSE(selectCanonicalWorldPose(odom_pose, now, 0.5).found);
+
+    CanonicalPoseSample mavros_local = pose;
+    mavros_local.frame_id = "uav1/local_origin";
+    EXPECT_FALSE(selectCanonicalWorldPose(mavros_local, now, 0.5).found);
+
+    CanonicalPoseSample missing;
+    EXPECT_FALSE(selectCanonicalWorldPose(missing, now, 0.5).found);
+
+    CanonicalPoseSample zero_stamp = pose;
+    zero_stamp.stamp = ros::Time();
+    EXPECT_FALSE(selectCanonicalWorldPose(zero_stamp, now, 0.5).found);
+
+    CanonicalPoseSample stale = pose;
+    stale.stamp = ros::Time(9, 0);
+    EXPECT_FALSE(selectCanonicalWorldPose(stale, now, 0.5).found);
+
     EXPECT_FALSE(isWorldFixedFrame("map"));
     EXPECT_FALSE(isWorldFixedFrame("odom"));
     EXPECT_TRUE(isWorldFixedFrame("/world"));
-
-    WorldEnuPoseSource zero_stamp_vrpn = vrpn_world;
-    zero_stamp_vrpn.stamp = ros::Time();
-    zero_stamp_vrpn.pose.position.z = 9.0;
-    const WorldEnuPoseSelection ignore_zero = selectWorldEnuPose(zero_stamp_vrpn, gazebo, missing, missing,
-                                                                  now, 0.5, 0.5, 0.5);
-    ASSERT_TRUE(ignore_zero.found);
-    EXPECT_STREQ(ignore_zero.source, "gazebo");
-    EXPECT_DOUBLE_EQ(ignore_zero.pose.position.z, 0.15);
-
-    WorldEnuPoseSource no_gazebo;
-    WorldEnuPoseSource local_world = vrpn_world;
-    local_world.pose.position.z = 4.25;
-    const WorldEnuPoseSelection from_local = selectWorldEnuPose(missing, no_gazebo, local_world, missing,
-                                                                 now, 0.5, 0.5, 0.5);
-    ASSERT_TRUE(from_local.found);
-    EXPECT_STREQ(from_local.source, "local-pose");
-    EXPECT_EQ(from_local.stamp, now);
-    EXPECT_DOUBLE_EQ(from_local.pose.position.z, 4.25);
-
-    WorldEnuPoseSource tf_world = local_world;
-    tf_world.pose.position.z = 5.5;
-    const WorldEnuPoseSelection from_tf = selectWorldEnuPose(missing, no_gazebo, missing, tf_world,
-                                                              now, 0.5, 0.5, 0.5);
-    ASSERT_TRUE(from_tf.found);
-    EXPECT_STREQ(from_tf.source, "tf");
-    EXPECT_EQ(from_tf.stamp, now);
-    EXPECT_DOUBLE_EQ(from_tf.pose.position.z, 5.5);
+    EXPECT_EQ(canonicalSlotPoseTopic("/uav7"), "/uav7/pose");
+    EXPECT_EQ(canonicalSlotPoseTopic("/ugv1"), "/ugv1/pose");
+    EXPECT_THROW(canonicalSlotPoseTopic("uav7"), std::invalid_argument);
+    EXPECT_THROW(canonicalSlotPoseTopic("/uav7/extra"), std::invalid_argument);
 }
 
 TEST(WorldFixedFrameRoot, AdvertisesParentOnTfWithoutMovingDisplays) {

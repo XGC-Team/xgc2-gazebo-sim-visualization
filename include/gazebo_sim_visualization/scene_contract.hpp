@@ -13,9 +13,8 @@
 
 namespace gazebo_sim_visualization {
 
-// Each concrete vehicle family owns a rendering path. Legacy uav/ugv parameter
-// names remain aliases only; new callers must provide the concrete lists so a
-// future airframe cannot silently inherit the FS150 mesh.
+// Each concrete vehicle family owns a rendering path. Callers must provide the
+// concrete lists so a future airframe cannot silently inherit the FS150 mesh.
 enum class RobotModelKind { kNone, kFs150, kScout, kMecanum };
 
 // SceneEntity updates replace the complete entity with the same ID. Keep the
@@ -79,24 +78,26 @@ class SceneUpdateCadence {
 
 std::set<std::string> parseModelNames(const std::string& csv);
 
-bool modelListsAreDisjoint(const std::set<std::string>& legacy_uav_models,
-                           const std::set<std::string>& legacy_ugv_models, const std::set<std::string>& fs150_models,
-                           const std::set<std::string>& scout_models, const std::set<std::string>& mecanum_models);
+bool modelListsAreDisjoint(const std::set<std::string>& fs150_models, const std::set<std::string>& scout_models,
+                           const std::set<std::string>& mecanum_models);
 
 RobotModelKind selectRobotModelKind(const std::string& model_name, const std::set<std::string>& configured_fs150_models,
                                     const std::set<std::string>& configured_scout_models,
-                                    const std::set<std::string>& configured_mecanum_models, bool allow_auto_discovery,
-                                    bool track_ugv);
+                                    const std::set<std::string>& configured_mecanum_models, bool track_ugv);
 
 std::string sceneEntityID(RobotModelKind kind, const std::string& model_name);
 
 std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name, SceneEntityPart part);
 
+// Experiment slot identity for the canonical world pose: /<namespace>/pose.
+// Offset and hybridSource are already applied by the upstream projection.
+std::string canonicalSlotPoseTopic(const std::string& ros_namespace);
+
 // Replace only the operator-facing text generated for one Robot. Marker
-// frames, namespaces, paths, and geometry continue to use the Gazebo / VRPN
-// scene-model identity, while the visible label uses the Experiment slot
-// identity. This is what lets a mixed fleet present slot `uav7` while its
-// physical/simulation pose remains anchored to scene model `ugv1`.
+// frames, namespaces, paths, and geometry continue to use the scene-model
+// identity, while the visible label uses the Experiment slot identity. Pose
+// itself is consumed from the slot canonical topic, not from scene-model
+// VRPN/Gazebo/MAVROS/TF.
 void applyExperimentSlotLabel(visualization_msgs::MarkerArray* markers, std::size_t first_marker,
                               const std::string& slot_name);
 
@@ -110,32 +111,28 @@ void appendSceneEntityPart(RobotModelKind kind, const std::string& model_name, S
                            const ros::Time& timestamp, const std::string& frame_id, const SceneLabelStyle& label_style,
                            foxglove_msgs::SceneUpdate* update);
 
-// Body/path poses come only from sources already in the product Fixed Frame
-// (world ENU z-up). map/odom/NED are not converted here.
+// Body/path poses come only from the slot canonical pose already in the product
+// Fixed Frame (world ENU z-up). map/odom/NED are not converted here. There is
+// no source priority and no fallback among VRPN, Gazebo, MAVROS, or TF.
 bool isWorldFixedFrame(const std::string& frame_id);
 
-struct WorldEnuPoseSource {
+struct CanonicalPoseSample {
     bool available{false};
     geometry_msgs::Pose pose;
     ros::Time stamp;
     std::string frame_id;
 };
 
-struct WorldEnuPoseSelection {
+struct CanonicalWorldPose {
     bool found{false};
     geometry_msgs::Pose pose;
     ros::Time stamp;
     std::string frame_id;
-    const char* source{""};
 };
 
-// Priority is world-frame VRPN, Gazebo truth, a local pose transformed through
-// TF, then an adapter-owned world TF. Every selected source retains its own
-// timestamp and already has world ENU semantics.
-WorldEnuPoseSelection selectWorldEnuPose(const WorldEnuPoseSource& vrpn, const WorldEnuPoseSource& gazebo,
-                                         const WorldEnuPoseSource& local_pose, const WorldEnuPoseSource& tf_pose,
-                                         const ros::Time& now, double vrpn_timeout_sec,
-                                         double local_pose_timeout_sec, double tf_pose_timeout_sec);
+// Accept the single canonical world-ENU pose, or nothing. timeout_sec is a
+// freshness window on that one sample; it does not select a substitute source.
+CanonicalWorldPose selectCanonicalWorldPose(const CanonicalPoseSample& pose, const ros::Time& now, double timeout_sec);
 
 // Identity child of the Fixed Frame published on /tf so RViz's Fixed Frame
 // (the parent) exists in the TF tree. Displays consume the parent, not the child.

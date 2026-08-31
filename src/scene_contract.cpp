@@ -31,24 +31,6 @@ std::string trim(const std::string& value) {
     return value.substr(first, value.find_last_not_of(whitespace) - first + 1);
 }
 
-std::string lower(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
-    return value;
-}
-
-bool isFs150Model(const std::string& name) {
-    static const std::regex pattern("^(uav|tello)[0-9]+$");
-    return std::regex_match(name, pattern);
-}
-
-bool isScoutModel(const std::string& name) {
-    static const std::regex pattern("^ugv[0-9]+$");
-    const std::string normalized = lower(name);
-    return std::regex_match(normalized, pattern) || normalized.find("scout") != std::string::npos;
-}
-
 geometry_msgs::Quaternion normalizedQuaternion(const geometry_msgs::Quaternion& source) {
     const double norm =
         std::sqrt(source.x * source.x + source.y * source.y + source.z * source.z + source.w * source.w);
@@ -99,6 +81,40 @@ double hexChannel(const std::string& value, std::size_t offset) {
     return static_cast<double>(high * 16 + low) / 255.0;
 }
 
+std::string normalizedFrameLabel(const std::string& frame_id) {
+    std::string normalized;
+    normalized.reserve(frame_id.size());
+    for (unsigned char character : frame_id) {
+        if (character == ' ' || character == '\t' || character == '\r' || character == '\n') {
+            continue;
+        }
+        normalized.push_back(static_cast<char>(std::tolower(character)));
+    }
+    if (!normalized.empty() && normalized.front() == '/') {
+        normalized.erase(normalized.begin());
+    }
+    const std::size_t slash = normalized.rfind('/');
+    if (slash != std::string::npos && slash + 1 < normalized.size()) {
+        normalized = normalized.substr(slash + 1);
+    }
+    return normalized;
+}
+
+bool isFreshCanonicalSample(const CanonicalPoseSample& source, const ros::Time& now, double timeout_sec) {
+    if (!source.available || source.stamp.isZero()) {
+        return false;
+    }
+    if (timeout_sec <= 0.0) {
+        return true;
+    }
+    return now - source.stamp <= ros::Duration(timeout_sec);
+}
+
+bool canonicalROSIdentifier(const std::string& value) {
+    static const std::regex pattern("^[A-Za-z_][A-Za-z0-9_]*$");
+    return !value.empty() && value.size() <= 127 && std::regex_match(value, pattern);
+}
+
 } // namespace
 
 SceneLabelStyle sceneLabelStyleFromMarkerColor(const std::string& marker_color) {
@@ -127,12 +143,10 @@ std::set<std::string> parseModelNames(const std::string& csv) {
     return names;
 }
 
-bool modelListsAreDisjoint(const std::set<std::string>& legacy_uav_models,
-                           const std::set<std::string>& legacy_ugv_models, const std::set<std::string>& fs150_models,
-                           const std::set<std::string>& scout_models, const std::set<std::string>& mecanum_models) {
+bool modelListsAreDisjoint(const std::set<std::string>& fs150_models, const std::set<std::string>& scout_models,
+                           const std::set<std::string>& mecanum_models) {
     std::set<std::string> seen;
-    for (const std::set<std::string>* models :
-         {&legacy_uav_models, &legacy_ugv_models, &fs150_models, &scout_models, &mecanum_models}) {
+    for (const std::set<std::string>* models : {&fs150_models, &scout_models, &mecanum_models}) {
         for (const std::string& model : *models) {
             if (!seen.insert(model).second) {
                 return false;
@@ -144,8 +158,7 @@ bool modelListsAreDisjoint(const std::set<std::string>& legacy_uav_models,
 
 RobotModelKind selectRobotModelKind(const std::string& model_name, const std::set<std::string>& configured_fs150_models,
                                     const std::set<std::string>& configured_scout_models,
-                                    const std::set<std::string>& configured_mecanum_models, bool allow_auto_discovery,
-                                    bool track_ugv) {
+                                    const std::set<std::string>& configured_mecanum_models, bool track_ugv) {
     const bool configured_fs150 = configured_fs150_models.count(model_name) != 0U;
     const bool configured_scout = configured_scout_models.count(model_name) != 0U;
     const bool configured_mecanum = configured_mecanum_models.count(model_name) != 0U;
@@ -161,15 +174,6 @@ RobotModelKind selectRobotModelKind(const std::string& model_name, const std::se
     }
     if (configured_mecanum) {
         return track_ugv ? RobotModelKind::kMecanum : RobotModelKind::kNone;
-    }
-    if (!allow_auto_discovery) {
-        return RobotModelKind::kNone;
-    }
-    if (isFs150Model(model_name)) {
-        return RobotModelKind::kFs150;
-    }
-    if (track_ugv && isScoutModel(model_name)) {
-        return RobotModelKind::kScout;
     }
     return RobotModelKind::kNone;
 }
@@ -191,6 +195,17 @@ std::string sceneEntityID(RobotModelKind kind, const std::string& model_name) {
 std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name, SceneEntityPart part) {
     const std::string robot_id = sceneEntityID(kind, model_name);
     return part == SceneEntityPart::kPath ? robot_id + "/path" : robot_id + "/label";
+}
+
+std::string canonicalSlotPoseTopic(const std::string& ros_namespace) {
+    if (ros_namespace.size() < 2U || ros_namespace.front() != '/' || ros_namespace.back() == '/') {
+        throw std::invalid_argument("canonical pose namespace must be an absolute ROS namespace");
+    }
+    const std::string identity = ros_namespace.substr(1);
+    if (!canonicalROSIdentifier(identity) || identity.find('/') != std::string::npos) {
+        throw std::invalid_argument("canonical pose namespace must be /<slot>");
+    }
+    return ros_namespace + "/pose";
 }
 
 void applyExperimentSlotLabel(visualization_msgs::MarkerArray* markers, std::size_t first_marker,
@@ -369,83 +384,19 @@ void appendSceneEntityPart(RobotModelKind kind, const std::string& model_name, S
                           &part, label_style, update);
 }
 
-namespace {
-
-std::string normalizedFrameLabel(const std::string& frame_id) {
-    std::string normalized;
-    normalized.reserve(frame_id.size());
-    for (unsigned char character : frame_id) {
-        if (character == ' ' || character == '\t' || character == '\r' || character == '\n') {
-            continue;
-        }
-        normalized.push_back(static_cast<char>(std::tolower(character)));
-    }
-    if (!normalized.empty() && normalized.front() == '/') {
-        normalized.erase(normalized.begin());
-    }
-    const std::size_t slash = normalized.rfind('/');
-    if (slash != std::string::npos && slash + 1 < normalized.size()) {
-        normalized = normalized.substr(slash + 1);
-    }
-    return normalized;
-}
-
-bool isFreshWorldSource(const WorldEnuPoseSource& source, const ros::Time& now, double timeout_sec) {
-    if (!source.available) {
-        return false;
-    }
-    if (timeout_sec <= 0.0) {
-        return true;
-    }
-    if (source.stamp.isZero()) {
-        return false;
-    }
-    return now - source.stamp <= ros::Duration(timeout_sec);
-}
-
-} // namespace
-
 bool isWorldFixedFrame(const std::string& frame_id) {
     return normalizedFrameLabel(frame_id) == "world";
 }
 
-WorldEnuPoseSelection selectWorldEnuPose(const WorldEnuPoseSource& vrpn, const WorldEnuPoseSource& gazebo,
-                                         const WorldEnuPoseSource& local_pose, const WorldEnuPoseSource& tf_pose,
-                                         const ros::Time& now, double vrpn_timeout_sec,
-                                         double local_pose_timeout_sec, double tf_pose_timeout_sec) {
-    WorldEnuPoseSelection selected;
-    if (isFreshWorldSource(vrpn, now, vrpn_timeout_sec) && isWorldFixedFrame(vrpn.frame_id)) {
-        selected.found = true;
-        selected.pose = vrpn.pose;
-        selected.stamp = vrpn.stamp;
-        selected.frame_id = vrpn.frame_id;
-        selected.source = "vrpn";
+CanonicalWorldPose selectCanonicalWorldPose(const CanonicalPoseSample& pose, const ros::Time& now, double timeout_sec) {
+    CanonicalWorldPose selected;
+    if (!isFreshCanonicalSample(pose, now, timeout_sec) || !isWorldFixedFrame(pose.frame_id)) {
         return selected;
     }
-    if (gazebo.available && isWorldFixedFrame(gazebo.frame_id)) {
-        selected.found = true;
-        selected.pose = gazebo.pose;
-        selected.stamp = gazebo.stamp;
-        selected.frame_id = gazebo.frame_id;
-        selected.source = "gazebo";
-        return selected;
-    }
-    if (isFreshWorldSource(local_pose, now, local_pose_timeout_sec) && isWorldFixedFrame(local_pose.frame_id)) {
-        selected.found = true;
-        selected.pose = local_pose.pose;
-        selected.stamp = local_pose.stamp;
-        selected.frame_id = local_pose.frame_id;
-        selected.source = "local-pose";
-        return selected;
-    }
-    if (isFreshWorldSource(tf_pose, now, tf_pose_timeout_sec) && isWorldFixedFrame(tf_pose.frame_id)) {
-        selected.found = true;
-        selected.pose = tf_pose.pose;
-        selected.stamp = tf_pose.stamp;
-        selected.frame_id = tf_pose.frame_id;
-        selected.source = "tf";
-        return selected;
-    }
+    selected.found = true;
+    selected.pose = pose.pose;
+    selected.stamp = pose.stamp;
+    selected.frame_id = pose.frame_id;
     return selected;
 }
 

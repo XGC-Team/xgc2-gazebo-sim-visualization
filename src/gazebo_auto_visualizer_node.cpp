@@ -21,7 +21,6 @@
 
 #include <foxglove_msgs/SceneEntityDeletion.h>
 #include <foxglove_msgs/SceneUpdate.h>
-#include <gazebo_msgs/ModelStates.h>
 #include <geometry_msgs/Pose.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Quaternion.h>
@@ -31,13 +30,9 @@
 #include <mavros_msgs/ExtendedState.h>
 #include <mavros_msgs/State.h>
 #include <nav_msgs/Path.h>
-#include <nav_msgs/Odometry.h>
 #include <ros/ros.h>
 #include <std_msgs/Empty.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_msgs/TFMessage.h>
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_listener.h>
 #include <visualization_msgs/MarkerArray.h>
 
 namespace {
@@ -101,12 +96,8 @@ std::string lower(std::string value) {
 
 class GazeboAutoVisualizer {
   public:
-    GazeboAutoVisualizer() : private_nh_("~"), tf_listener_(tf_buffer_) {
+    GazeboAutoVisualizer() : private_nh_("~") {
         private_nh_.param<std::string>("frame_id", frame_id_, "world");
-        private_nh_.param<std::string>("model_states_topic", model_states_topic_, "/gazebo/model_states");
-        private_nh_.param<std::string>("vrpn_pose_prefix", vrpn_pose_prefix_, "/vrpn_client_node");
-        private_nh_.param<std::string>("tracked_uav_models", tracked_uav_models_csv_, "");
-        private_nh_.param<std::string>("tracked_ugv_models", tracked_ugv_models_csv_, "");
         private_nh_.param<std::string>("tracked_fs150_models", tracked_fs150_models_csv_, "");
         private_nh_.param<std::string>("tracked_scout_models", tracked_scout_models_csv_, "");
         private_nh_.param<std::string>("tracked_mecanum_models", tracked_mecanum_models_csv_, "");
@@ -119,7 +110,6 @@ class GazeboAutoVisualizer {
             throw std::runtime_error("marker_color is required");
         }
         scene_label_style_ = gazebo_sim_visualization::sceneLabelStyleFromMarkerColor(marker_color_);
-        private_nh_.param("allow_auto_discovery", allow_auto_discovery_, true);
         private_nh_.param("track_ugv", track_ugv_, true);
         private_nh_.param("publish_markers", publish_markers_, true);
         private_nh_.param("publish_transforms", publish_transforms_, true);
@@ -139,11 +129,7 @@ class GazeboAutoVisualizer {
         private_nh_.param("path_limit", path_limit_, 0);
         private_nh_.param("path_history_duration", path_history_duration_sec_,
                           xgc2_robot_visualization::kDefaultPathHistoryDurationSec);
-        private_nh_.param("vrpn_timeout", vrpn_timeout_sec_, 0.5);
-        private_nh_.param("local_pose_timeout", local_pose_timeout_sec_, 0.5);
-        private_nh_.param("tf_pose_timeout", tf_pose_timeout_sec_, 0.5);
-        private_nh_.param<std::string>("uav_local_pose_topic_suffix", uav_local_pose_topic_suffix_,
-                                       "/mavros/local_position/pose");
+        private_nh_.param("canonical_pose_timeout", canonical_pose_timeout_sec_, 0.5);
         private_nh_.param("mavros_state_timeout", mavros_state_timeout_sec_, 2.0);
         private_nh_.param<std::string>("mavros_state_topic_suffix", mavros_state_topic_suffix_, "/mavros/state");
         private_nh_.param<std::string>("mavros_extended_state_topic_suffix", mavros_extended_state_topic_suffix_,
@@ -206,21 +192,13 @@ class GazeboAutoVisualizer {
         mecanum_config.path_limit = path_limit_;
         mecanum_visualizer_.reset(new xgc2_robot_visualization::MecanumUgvVisualizer(mecanum_config));
 
-        const std::set<std::string> legacy_uav_models =
-            gazebo_sim_visualization::parseModelNames(tracked_uav_models_csv_);
-        const std::set<std::string> legacy_ugv_models =
-            gazebo_sim_visualization::parseModelNames(tracked_ugv_models_csv_);
         configured_fs150_models_ = gazebo_sim_visualization::parseModelNames(tracked_fs150_models_csv_);
         configured_scout_models_ = gazebo_sim_visualization::parseModelNames(tracked_scout_models_csv_);
         configured_mecanum_models_ = gazebo_sim_visualization::parseModelNames(tracked_mecanum_models_csv_);
-        if (!gazebo_sim_visualization::modelListsAreDisjoint(legacy_uav_models, legacy_ugv_models,
-                                                             configured_fs150_models_, configured_scout_models_,
+        if (!gazebo_sim_visualization::modelListsAreDisjoint(configured_fs150_models_, configured_scout_models_,
                                                              configured_mecanum_models_)) {
-            throw std::runtime_error(
-                "tracked FS150, Scout, and Mecanum model lists (including legacy aliases) must be disjoint");
+            throw std::runtime_error("tracked FS150, Scout, and Mecanum model lists must be disjoint");
         }
-        configured_fs150_models_.insert(legacy_uav_models.begin(), legacy_uav_models.end());
-        configured_scout_models_.insert(legacy_ugv_models.begin(), legacy_ugv_models.end());
         for (const std::string& name : configured_fs150_models_) {
             ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kFs150);
         }
@@ -231,6 +209,7 @@ class GazeboAutoVisualizer {
             ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kMecanum);
         }
         configureFrozenRoster();
+        subscribeCanonicalPoses();
         scene_ready_pub_ = nh_.advertise<std_msgs::Empty>("/xgc/robot_scene/ready", 1, true);
 
         if (publish_markers_) {
@@ -253,7 +232,6 @@ class GazeboAutoVisualizer {
             }
         }
 
-        model_states_sub_ = nh_.subscribe(model_states_topic_, 5, &GazeboAutoVisualizer::modelStatesCallback, this);
         publish_timer_ =
             nh_.createTimer(ros::Duration(1.0 / publish_rate_), &GazeboAutoVisualizer::publishCallback, this);
     }
@@ -261,25 +239,19 @@ class GazeboAutoVisualizer {
   private:
     struct TrackedModel {
         std::string name;
-        // Operator-facing Experiment slot identity. Pose, TF, and ROS source
-        // lookup deliberately continue to use `name`, the Gazebo / VRPN scene
-        // model identity (for example slot uav7 backed by model ugv1).
+        // Operator-facing Experiment slot identity. Mesh/TF geometry continues
+        // to use `name`, the scene-model identity (for example slot uav7 backed
+        // by model ugv1). Canonical pose is always /<ros_namespace>/pose.
         std::string slot_name;
+        std::string ros_namespace;
         gazebo_sim_visualization::RobotModelKind kind;
-        geometry_msgs::Pose gazebo_pose;
-        ros::Time gazebo_stamp;
-        gazebo_sim_visualization::WorldEnuPoseSource local_world_pose;
-        geometry_msgs::Pose vrpn_pose;
-        std::string vrpn_frame_id;
-        bool has_gazebo_pose{false};
-        bool has_vrpn_pose{false};
+        gazebo_sim_visualization::CanonicalPoseSample canonical_pose;
         bool has_mavros_state{false};
         bool mavros_armed{false};
         std::uint8_t mavros_landed_state{0};
         bool has_mavros_extended_state{false};
         ros::Time mavros_extended_state_stamp;
         ros::Subscriber mavros_extended_state_subscriber;
-        ros::Time vrpn_stamp;
         ros::Time mavros_state_stamp;
         geometry_msgs::Twist cmd_vel;
         geometry_msgs::TwistStamped twist;
@@ -287,12 +259,10 @@ class GazeboAutoVisualizer {
         bool has_twist{false};
         ros::Time cmd_vel_stamp;
         ros::Time twist_stamp;
-        ros::Subscriber vrpn_subscriber;
+        ros::Subscriber pose_subscriber;
         ros::Subscriber mavros_state_subscriber;
         ros::Subscriber cmd_vel_subscriber;
         ros::Subscriber twist_subscriber;
-        ros::Subscriber local_pose_subscriber;
-        ros::Subscriber odometry_subscriber;
     };
 
     struct PathPublisherRuntime {
@@ -308,8 +278,6 @@ class GazeboAutoVisualizer {
                 throw std::runtime_error(std::string(kRosterEnvironment) +
                                          " is required when publish_paths is enabled");
             }
-            // The standalone RViz launch predates the managed frozen roster.
-            // Its scene-model identity remains the presentation fallback.
             return;
         }
         std::vector<xgc2_robot_visualization::RobotDescription> roster;
@@ -331,6 +299,7 @@ class GazeboAutoVisualizer {
             }
             auto tracked = models_.find(robot.scene_model);
             tracked->second.slot_name = robot.name;
+            tracked->second.ros_namespace = robot.ros_namespace;
             if (!publish_paths_) {
                 continue;
             }
@@ -348,26 +317,22 @@ class GazeboAutoVisualizer {
             config.max_points = path_limit_;
             runtime.history.reset(new xgc2_robot_visualization::BoundedPathRuntime(frame_id_, config));
             path_publishers_.emplace(robot.scene_model, std::move(runtime));
-            if (tracked->second.kind == gazebo_sim_visualization::RobotModelKind::kFs150) {
-                const std::string topic = modelScopedTopic(robot.name, uav_local_pose_topic_suffix_,
-                                                           "/mavros/local_position/pose");
-                tracked->second.local_pose_subscriber =
-                    nh_.subscribe<geometry_msgs::PoseStamped>(topic, 10,
-                        [this, scene_model = robot.scene_model](const geometry_msgs::PoseStampedConstPtr& msg) {
-                            localPoseCallback(scene_model, msg);
-                        });
-            } else if (!robot.odometry_topic.empty()) {
-                const std::string topic =
-                    xgc2_robot_visualization::namespacedPathTopic(robot.ros_namespace, robot.odometry_topic);
-                tracked->second.odometry_subscriber =
-                    nh_.subscribe<nav_msgs::Odometry>(topic, 10,
-                        [this, scene_model = robot.scene_model](const nav_msgs::OdometryConstPtr& msg) {
-                            odometryCallback(scene_model, msg);
-                        });
-            }
         }
         if (publish_paths_ && path_publishers_.size() != configured_models.size()) {
             throw std::runtime_error("Path roster must map every tracked scene model exactly once");
+        }
+    }
+
+    void subscribeCanonicalPoses() {
+        for (auto& entry : models_) {
+            TrackedModel& model = entry.second;
+            const std::string topic = gazebo_sim_visualization::canonicalSlotPoseTopic(model.ros_namespace);
+            model.pose_subscriber = nh_.subscribe<geometry_msgs::PoseStamped>(
+                topic, 10, [this, scene_model = model.name](const geometry_msgs::PoseStampedConstPtr& msg) {
+                    canonicalPoseCallback(scene_model, msg);
+                });
+            ROS_INFO("[gazebo_auto_visualizer] Canonical pose for scene model '%s' slot '%s' is %s",
+                     model.name.c_str(), model.slot_name.c_str(), topic.c_str());
         }
     }
 
@@ -381,8 +346,8 @@ class GazeboAutoVisualizer {
         TrackedModel model;
         model.name = name;
         model.slot_name = name;
+        model.ros_namespace = "/" + name;
         model.kind = kind;
-        model.vrpn_subscriber = subscribeVrpn(name);
         if (kind == gazebo_sim_visualization::RobotModelKind::kFs150) {
             model.mavros_state_subscriber = subscribeMavrosState(name);
             model.mavros_extended_state_subscriber = subscribeMavrosExtendedState(name);
@@ -399,38 +364,6 @@ class GazeboAutoVisualizer {
         }
         ROS_INFO("[gazebo_auto_visualizer] Tracking %s model '%s'", kind_name, name.c_str());
         return inserted;
-    }
-
-    void modelStatesCallback(const gazebo_msgs::ModelStatesConstPtr& msg) {
-        const ros::Time stamp = ros::Time::now();
-        for (std::size_t i = 0; i < msg->name.size() && i < msg->pose.size(); ++i) {
-            const std::string& name = msg->name[i];
-            const gazebo_sim_visualization::RobotModelKind kind = gazebo_sim_visualization::selectRobotModelKind(
-                name, configured_fs150_models_, configured_scout_models_, configured_mecanum_models_,
-                allow_auto_discovery_, track_ugv_);
-            if (kind == gazebo_sim_visualization::RobotModelKind::kNone) {
-                continue;
-            }
-            if (!isFinite(msg->pose[i])) {
-                ROS_WARN_THROTTLE(2.0,
-                                  "[gazebo_auto_visualizer] Ignoring non-finite pose "
-                                  "for model '%s'",
-                                  name.c_str());
-                continue;
-            }
-            auto it = ensureTrackedModel(name, kind);
-            it->second.gazebo_pose = copyPose(msg->pose[i]);
-            it->second.gazebo_stamp = stamp;
-            it->second.has_gazebo_pose = true;
-        }
-    }
-
-    ros::Subscriber subscribeVrpn(const std::string& name) {
-        const std::string topic = vrpn_pose_prefix_ + "/" + name + "/pose";
-        return nh_.subscribe<geometry_msgs::PoseStamped>(topic, 10,
-                                                         [this, name](const geometry_msgs::PoseStampedConstPtr& msg) {
-                                                             vrpnPoseCallback(name, msg);
-                                                         });
     }
 
     // Rotor speed reads the flight state machine; it does not model aerodynamics.
@@ -498,51 +431,15 @@ class GazeboAutoVisualizer {
         return "/" + name + normalized_suffix;
     }
 
-    void vrpnPoseCallback(const std::string& name, const geometry_msgs::PoseStampedConstPtr& msg) {
+    void canonicalPoseCallback(const std::string& name, const geometry_msgs::PoseStampedConstPtr& msg) {
         auto it = models_.find(name);
         if (it == models_.end() || !isFinite(msg->pose)) {
             return;
         }
-        it->second.vrpn_pose = copyPose(msg->pose);
-        it->second.vrpn_frame_id = msg->header.frame_id;
-        it->second.vrpn_stamp = msg->header.stamp;
-        it->second.has_vrpn_pose = true;
-    }
-
-    void storeLocalWorldPose(const std::string& name, const geometry_msgs::PoseStamped& source) {
-        auto it = models_.find(name);
-        if (it == models_.end() || source.header.stamp.isZero() || !isFinite(source.pose)) {
-            return;
-        }
-        geometry_msgs::PoseStamped world_pose;
-        try {
-            if (gazebo_sim_visualization::isWorldFixedFrame(source.header.frame_id)) {
-                world_pose = source;
-                world_pose.header.frame_id = frame_id_;
-            } else {
-                tf_buffer_.transform(source, world_pose, frame_id_, ros::Duration(0.02));
-            }
-        } catch (const tf2::TransformException& exception) {
-            ROS_WARN_THROTTLE(2.0,
-                              "[gazebo_auto_visualizer] Cannot transform local pose for '%s' from '%s' to '%s': %s",
-                              name.c_str(), source.header.frame_id.c_str(), frame_id_.c_str(), exception.what());
-            return;
-        }
-        it->second.local_world_pose.available = true;
-        it->second.local_world_pose.pose = copyPose(world_pose.pose);
-        it->second.local_world_pose.stamp = source.header.stamp;
-        it->second.local_world_pose.frame_id = frame_id_;
-    }
-
-    void localPoseCallback(const std::string& name, const geometry_msgs::PoseStampedConstPtr& msg) {
-        storeLocalWorldPose(name, *msg);
-    }
-
-    void odometryCallback(const std::string& name, const nav_msgs::OdometryConstPtr& msg) {
-        geometry_msgs::PoseStamped pose;
-        pose.header = msg->header;
-        pose.pose = msg->pose.pose;
-        storeLocalWorldPose(name, pose);
+        it->second.canonical_pose.available = true;
+        it->second.canonical_pose.pose = copyPose(msg->pose);
+        it->second.canonical_pose.stamp = msg->header.stamp;
+        it->second.canonical_pose.frame_id = msg->header.frame_id;
     }
 
     void mavrosStateCallback(const std::string& name, const mavros_msgs::StateConstPtr& msg) {
@@ -575,47 +472,13 @@ class GazeboAutoVisualizer {
         it->second.has_twist = true;
     }
 
-    gazebo_sim_visualization::WorldEnuPoseSource tfWorldPose(const TrackedModel& model,
-                                                             const ros::Time& now) const {
-        gazebo_sim_visualization::WorldEnuPoseSource source;
-        try {
-            const geometry_msgs::TransformStamped transform = tf_buffer_.lookupTransform(
-                frame_id_, xgc2_robot_visualization::robotBodyFrame(model.name), ros::Time(0));
-            if (transform.header.stamp.isZero() ||
-                now - transform.header.stamp > ros::Duration(tf_pose_timeout_sec_)) {
-                return source;
-            }
-            source.available = true;
-            source.pose.position.x = transform.transform.translation.x;
-            source.pose.position.y = transform.transform.translation.y;
-            source.pose.position.z = transform.transform.translation.z;
-            source.pose.orientation = normalize(transform.transform.rotation);
-            source.stamp = transform.header.stamp;
-            source.frame_id = frame_id_;
-        } catch (const tf2::TransformException&) {
-        }
-        return source;
+    gazebo_sim_visualization::CanonicalWorldPose selectWorldPose(const TrackedModel& model,
+                                                                 const ros::Time& now) const {
+        return gazebo_sim_visualization::selectCanonicalWorldPose(model.canonical_pose, now,
+                                                                  canonical_pose_timeout_sec_);
     }
 
-    gazebo_sim_visualization::WorldEnuPoseSelection selectWorldPose(const TrackedModel& model,
-                                                                    const ros::Time& now) const {
-        gazebo_sim_visualization::WorldEnuPoseSource vrpn;
-        vrpn.available = model.has_vrpn_pose;
-        vrpn.pose = model.vrpn_pose;
-        vrpn.stamp = model.vrpn_stamp;
-        vrpn.frame_id = model.vrpn_frame_id;
-        gazebo_sim_visualization::WorldEnuPoseSource gazebo;
-        gazebo.available = model.has_gazebo_pose;
-        gazebo.pose = model.gazebo_pose;
-        gazebo.stamp = model.gazebo_stamp;
-        gazebo.frame_id = frame_id_;
-        return gazebo_sim_visualization::selectWorldEnuPose(
-            vrpn, gazebo, model.local_world_pose, tfWorldPose(model, now), now,
-            vrpn_timeout_sec_, local_pose_timeout_sec_, tf_pose_timeout_sec_);
-    }
-
-    void publishPath(const TrackedModel& model,
-                     const gazebo_sim_visualization::WorldEnuPoseSelection& world_pose) {
+    void publishPath(const TrackedModel& model, const gazebo_sim_visualization::CanonicalWorldPose& world_pose) {
         if (!publish_paths_) {
             return;
         }
@@ -654,8 +517,7 @@ class GazeboAutoVisualizer {
         if (!normalized_visual_frame.empty() && normalized_visual_frame.front() == '/') {
             normalized_visual_frame.erase(normalized_visual_frame.begin());
         }
-        return !normalized.empty() && (normalized == normalized_visual_frame || normalized == "world" ||
-                                       normalized == "map" || normalized == "odom");
+        return !normalized.empty() && (normalized == normalized_visual_frame || normalized == "world");
     }
 
     xgc2_robot_visualization::UgvVisualState
@@ -744,7 +606,7 @@ class GazeboAutoVisualizer {
         std::size_t world_pose_count = 0U;
         for (auto& entry : models_) {
             TrackedModel& model = entry.second;
-            const gazebo_sim_visualization::WorldEnuPoseSelection world_pose = selectWorldPose(model, now);
+            const gazebo_sim_visualization::CanonicalWorldPose world_pose = selectWorldPose(model, now);
             if (!world_pose.found) {
                 continue;
             }
@@ -768,8 +630,8 @@ class GazeboAutoVisualizer {
             gazebo_sim_visualization::applyExperimentSlotLabel(&markers, first_marker, model.slot_name);
             if (publish_scene_paths_ && scene_decision.publish_path) {
                 gazebo_sim_visualization::appendSceneEntityPart(
-                    model.kind, model.slot_name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
-                    now, frame_id_, scene_label_style_, &scene_update);
+                    model.kind, model.slot_name, gazebo_sim_visualization::SceneEntityPart::kPath, markers,
+                    first_marker, now, frame_id_, scene_label_style_, &scene_update);
             }
             if (scene_decision.publish_label) {
                 // The label rides the scene cadence because its content -- a
@@ -777,8 +639,8 @@ class GazeboAutoVisualizer {
                 // drawn comes from its anchor transform instead, which is why
                 // it can move at the pose rate without being retransmitted.
                 gazebo_sim_visualization::appendSceneEntityPart(
-                    model.kind, model.slot_name, gazebo_sim_visualization::SceneEntityPart::kLabel, markers, first_marker,
-                    now, frame_id_, scene_label_style_, &scene_update);
+                    model.kind, model.slot_name, gazebo_sim_visualization::SceneEntityPart::kLabel, markers,
+                    first_marker, now, frame_id_, scene_label_style_, &scene_update);
             }
         }
 
@@ -822,19 +684,15 @@ class GazeboAutoVisualizer {
             gazebo_sim_visualization::frozenVisualizationRosterReady(models_.size(), world_pose_count)) {
             scene_ready_pub_.publish(std_msgs::Empty());
             scene_ready_published_ = true;
-            ROS_INFO_STREAM("published frozen visualization readiness for " << world_pose_count
-                                                                             << " Robot(s)");
+            ROS_INFO_STREAM("published frozen visualization readiness for " << world_pose_count << " Robot(s)");
         }
     }
 
     ros::NodeHandle nh_;
     ros::NodeHandle private_nh_;
-    tf2_ros::Buffer tf_buffer_;
-    tf2_ros::TransformListener tf_listener_;
     ros::Publisher marker_pub_;
     ros::Publisher scene_update_pub_;
     ros::Publisher scene_ready_pub_;
-    ros::Subscriber model_states_sub_;
     ros::Timer publish_timer_;
     // Deliberately not tf2_ros::TransformBroadcaster: that publishes to the
     // global /tf, where a simulator already broadcasts the same frame names at
@@ -857,17 +715,12 @@ class GazeboAutoVisualizer {
     gazebo_sim_visualization::SceneLabelStyle scene_label_style_;
 
     std::string frame_id_;
-    std::string model_states_topic_;
-    std::string vrpn_pose_prefix_;
     std::string mavros_extended_state_topic_suffix_;
-    std::string uav_local_pose_topic_suffix_{"/mavros/local_position/pose"};
     double uav_rotor_speed_ground_rad_s_{25.0};
     double uav_rotor_speed_transition_rad_s_{90.0};
     double uav_rotor_speed_airborne_rad_s_{60.0};
     double joint_transform_publish_rate_{5.0};
     std::unique_ptr<gazebo_sim_visualization::PublishCadence> joint_transform_cadence_;
-    std::string tracked_uav_models_csv_;
-    std::string tracked_ugv_models_csv_;
     std::string tracked_fs150_models_csv_;
     std::string tracked_scout_models_csv_;
     std::string tracked_mecanum_models_csv_;
@@ -882,9 +735,7 @@ class GazeboAutoVisualizer {
     double path_publish_rate_{xgc2_robot_visualization::kDefaultPathPublishRateHz};
     int path_limit_{0};
     double path_history_duration_sec_{xgc2_robot_visualization::kDefaultPathHistoryDurationSec};
-    double vrpn_timeout_sec_{0.5};
-    double local_pose_timeout_sec_{0.5};
-    double tf_pose_timeout_sec_{0.5};
+    double canonical_pose_timeout_sec_{0.5};
     double mavros_state_timeout_sec_{2.0};
     double ugv_motion_timeout_sec_{0.5};
     double rotor_speed_rad_s_{70.0};
@@ -895,7 +746,6 @@ class GazeboAutoVisualizer {
     double ugv_visual_track_width_{0.416};
     double ugv_wheel_motion_deadband_{0.02};
     double ugv_max_visual_wheel_speed_rad_s_{35.0};
-    bool allow_auto_discovery_{true};
     bool track_ugv_{true};
     bool publish_markers_{true};
     bool publish_transforms_{true};

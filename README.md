@@ -1,10 +1,12 @@
 # XGC2 Gazebo Sim Visualization
 
-ROS Noetic RViz adapter for XGC2 Gazebo Classic simulations.
+ROS Noetic adapter that places frozen Experiment robots into RViz and Lichtblick.
 
-This repository contains the `gazebo_sim_visualization` package. It discovers
-Gazebo models and adapts Gazebo/MAVROS topics into reusable robot visualizers
-from `xgc2_robot_visualization`.
+`gazebo_auto_visualizer_node` consumes each slot's canonical world pose
+`/<namespace>/pose` and drives reusable visualizers from
+`xgc2_robot_visualization`. It does not select among raw VRPN, Gazebo truth,
+MAVROS `local_position`, or TF, and it does not apply `localizationOffset` or
+`hybridSource`. Those are already decided by the upstream projection.
 
 The Mecanum renderer is a required build dependency. Standalone CI builds its
 immutable capability source when production APT has not caught up; release
@@ -21,49 +23,62 @@ catkin_make
 
 ```bash
 roslaunch gazebo_sim_visualization gazebo_auto_visualization_rviz.launch \
+  tracked_fs150_models:=uav1 \
+  tracked_scout_models:=ugv1 \
+  tracked_mecanum_models:=ugv2 \
   marker_color:=#000000
 ```
 
+Standalone launches must name every scene model. There is no Gazebo
+auto-discovery and no `tracked_uav_models` / `tracked_ugv_models` alias.
+
+## Canonical pose
+
+Robot body placement, slot labels, and history Path all read one sample:
+
+- Topic: `/<namespace>/pose` (`geometry_msgs/PoseStamped`)
+- Frame: product Fixed Frame `world` ENU. `map`, `odom`, and MAVROS local
+  frames are refused.
+- Freshness: `canonical_pose_timeout` (default `0.5` s) applies only to that
+  sample. A missing or stale pose hides that robot; it does not fall back to
+  another source.
+
+A frozen roster (`XGC2_ROBOT_VISUALIZATION_ROSTER`) maps scene-model identity
+used by URDF/TF to the Experiment slot namespace that owns `/<slot>/pose`.
+
 ## UAV rotor state
 
-`gazebo_auto_visualizer_node` discovers UAV poses from `/gazebo/model_states`
-and passes them to `xgc2_robot_visualization::Fs150UavVisualizer`. Rotor
-animation is controlled only by `/<uav_name>/mavros/state`:
+Rotor animation is a visual cue from `/<scene_model>/mavros/state` and
+extended state. It is not a pose source.
 
-- `mavros_msgs/State.armed == true`: rotors advance at `rotor_speed_rad_s`.
+- `mavros_msgs/State.armed == true`: rotors advance at the landed-state tier.
 - Missing or stale state, or `armed == false`: rotors stop at the current phase.
-
-Relevant parameters:
-
-- `mavros_state_topic_suffix`: defaults to `/mavros/state`.
-- `mavros_state_timeout`: defaults to `2.0` seconds, long enough for typical MAVROS state heartbeat intervals while still stopping on stale state.
-- `rotor_speed_rad_s`: visual fixed rotor speed while active.
 
 ## Lichtblick SceneUpdate
 
-The same node can publish each selected vehicle as a persistent
+The same node can publish labels and history trails as persistent
 `foxglove_msgs/SceneEntity` on `/xgc/scene`. FS150, Scout, and Mecanum use
-separate rendering paths and separate entity identities; a Mecanum vehicle is
-never rendered with the Scout mesh.
+separate rendering paths and separate entity identities. Robot meshes stay in
+the robot's own URDF, placed from `/xgc/tf`; this node does not republish those
+meshes into the scene.
 
 XGC starts this mode with typed model lists derived from the experiment run's
-immutable Swarm Asset snapshot. The relevant node parameters are:
+immutable Robot snapshot:
 
 - `publish_scene_update`: enables SceneUpdate output; defaults to `false` so existing RViz launches are unchanged.
 - `scene_update_topic`: defaults to `/xgc/scene`.
-- `tracked_fs150_models`: comma-separated FS150 Gazebo/VRPN model names.
-- `tracked_scout_models`: comma-separated Scout Gazebo/VRPN model names.
-- `tracked_mecanum_models`: comma-separated Mecanum Gazebo/VRPN model names.
+- `tracked_fs150_models` / `tracked_scout_models` / `tracked_mecanum_models`
 - `marker_color`: required canonical lowercase `#rrggbb` color shared by every robot label.
-- `allow_auto_discovery`: may be disabled so only robots declared by the run snapshot appear.
 - `publish_markers` and `publish_transforms`: may be disabled for the dedicated Lichtblick publisher.
 
-`tracked_uav_models` and `tracked_ugv_models` remain compatibility aliases for
-FS150 and Scout respectively. A model may appear in exactly one list; conflicting
-or duplicated type assignments fail at startup. Automatic discovery only covers
-the legacy FS150/Scout name patterns, because a name such as `ugv1` is not enough
-to distinguish Scout from Mecanum. Pass `tracked_mecanum_models` explicitly for
-direct RViz launches.
+Algorithm `nav_msgs/Path`, `geometry_msgs/PoseArray`, and
+`visualization_msgs/Marker` / `MarkerArray` stay on their declared ROS topics.
+Core Lichtblick layout subscribes to them directly. This node does not
+republish or restyle those messages.
+
+This package is not the camera-image overlay owner. Image AR URDF layering
+(`runMode` / `hybridSource`) and native Lichtblick topic settings live in the
+Core Lichtblick layout plugin.
 
 ## UGV wheel state
 
@@ -75,16 +90,6 @@ not a real wheel-speed display:
 - Fresh `/<ugv_name>/cmd_vel` is used when no twist is available.
 - Without a fresh motion hint, wheel motion is estimated from pose changes.
 - Static or near-static motion keeps the wheels stopped.
-
-Relevant parameters:
-
-- `ugv_motion_timeout`: defaults to `0.5` seconds.
-- `ugv_cmd_vel_topic_suffix`: defaults to `/cmd_vel`.
-- `ugv_twist_topic_suffix`: defaults to `/twist`.
-- `ugv_visual_wheel_radius`: defaults to `0.08`.
-- `ugv_visual_track_width`: defaults to `0.416`.
-- `ugv_wheel_motion_deadband`: defaults to `0.02`.
-- `ugv_max_visual_wheel_speed_rad_s`: defaults to `35.0`.
 
 ## Mecanum visual state
 
@@ -98,14 +103,3 @@ differential-drive wheel phases.
 `mecanum_mesh_scale` defaults to `0.001`, matching the millimetre-authored
 `mecanum_description` STL assets. It is deliberately separate from
 the Scout `ugv_mesh_scale` parameter.
-
-For a direct mixed RViz launch, declare each type explicitly:
-
-```bash
-roslaunch gazebo_sim_visualization gazebo_auto_visualization_rviz.launch \
-  tracked_fs150_models:=uav1 \
-  tracked_scout_models:=ugv1 \
-  tracked_mecanum_models:=ugv2 \
-  marker_color:=#000000 \
-  allow_auto_discovery:=false
-```
