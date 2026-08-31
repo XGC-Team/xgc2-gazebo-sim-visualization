@@ -230,7 +230,7 @@ class GazeboAutoVisualizer {
         for (const std::string& name : configured_mecanum_models_) {
             ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kMecanum);
         }
-        configurePathPublishers();
+        configureFrozenRoster();
         scene_ready_pub_ = nh_.advertise<std_msgs::Empty>("/xgc/robot_scene/ready", 1, true);
 
         if (publish_markers_) {
@@ -261,6 +261,10 @@ class GazeboAutoVisualizer {
   private:
     struct TrackedModel {
         std::string name;
+        // Operator-facing Experiment slot identity. Pose, TF, and ROS source
+        // lookup deliberately continue to use `name`, the Gazebo / VRPN scene
+        // model identity (for example slot uav7 backed by model ugv1).
+        std::string slot_name;
         gazebo_sim_visualization::RobotModelKind kind;
         geometry_msgs::Pose gazebo_pose;
         ros::Time gazebo_stamp;
@@ -297,13 +301,16 @@ class GazeboAutoVisualizer {
         std::unique_ptr<xgc2_robot_visualization::BoundedPathRuntime> history;
     };
 
-    void configurePathPublishers() {
-        if (!publish_paths_) {
-            return;
-        }
+    void configureFrozenRoster() {
         const char* raw_roster = std::getenv(kRosterEnvironment);
         if (raw_roster == nullptr) {
-            throw std::runtime_error(std::string(kRosterEnvironment) + " is required when publish_paths is enabled");
+            if (publish_paths_) {
+                throw std::runtime_error(std::string(kRosterEnvironment) +
+                                         " is required when publish_paths is enabled");
+            }
+            // The standalone RViz launch predates the managed frozen roster.
+            // Its scene-model identity remains the presentation fallback.
+            return;
         }
         std::vector<xgc2_robot_visualization::RobotDescription> roster;
         std::string error;
@@ -322,6 +329,11 @@ class GazeboAutoVisualizer {
                 throw std::runtime_error("Path roster scene model '" + robot.scene_model +
                                          "' is not tracked by the scene process");
             }
+            auto tracked = models_.find(robot.scene_model);
+            tracked->second.slot_name = robot.name;
+            if (!publish_paths_) {
+                continue;
+            }
             const std::string topic =
                 xgc2_robot_visualization::namespacedPathTopic(robot.ros_namespace, robot.path_topic);
             if (!topics.insert(topic).second) {
@@ -336,7 +348,6 @@ class GazeboAutoVisualizer {
             config.max_points = path_limit_;
             runtime.history.reset(new xgc2_robot_visualization::BoundedPathRuntime(frame_id_, config));
             path_publishers_.emplace(robot.scene_model, std::move(runtime));
-            auto tracked = models_.find(robot.scene_model);
             if (tracked->second.kind == gazebo_sim_visualization::RobotModelKind::kFs150) {
                 const std::string topic = modelScopedTopic(robot.name, uav_local_pose_topic_suffix_,
                                                            "/mavros/local_position/pose");
@@ -355,7 +366,7 @@ class GazeboAutoVisualizer {
                         });
             }
         }
-        if (path_publishers_.size() != configured_models.size()) {
+        if (publish_paths_ && path_publishers_.size() != configured_models.size()) {
             throw std::runtime_error("Path roster must map every tracked scene model exactly once");
         }
     }
@@ -369,6 +380,7 @@ class GazeboAutoVisualizer {
 
         TrackedModel model;
         model.name = name;
+        model.slot_name = name;
         model.kind = kind;
         model.vrpn_subscriber = subscribeVrpn(name);
         if (kind == gazebo_sim_visualization::RobotModelKind::kFs150) {
@@ -753,9 +765,10 @@ class GazeboAutoVisualizer {
             } else {
                 ugv_visualizer_->append(makeUgvVisualState(model, *pose, now), &markers, &transforms);
             }
+            gazebo_sim_visualization::applyExperimentSlotLabel(&markers, first_marker, model.slot_name);
             if (publish_scene_paths_ && scene_decision.publish_path) {
                 gazebo_sim_visualization::appendSceneEntityPart(
-                    model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
+                    model.kind, model.slot_name, gazebo_sim_visualization::SceneEntityPart::kPath, markers, first_marker,
                     now, frame_id_, scene_label_style_, &scene_update);
             }
             if (scene_decision.publish_label) {
@@ -764,7 +777,7 @@ class GazeboAutoVisualizer {
                 // drawn comes from its anchor transform instead, which is why
                 // it can move at the pose rate without being retransmitted.
                 gazebo_sim_visualization::appendSceneEntityPart(
-                    model.kind, model.name, gazebo_sim_visualization::SceneEntityPart::kLabel, markers, first_marker,
+                    model.kind, model.slot_name, gazebo_sim_visualization::SceneEntityPart::kLabel, markers, first_marker,
                     now, frame_id_, scene_label_style_, &scene_update);
             }
         }

@@ -197,6 +197,59 @@ TEST(SceneContract, RobotAndPathUsePersistentIndependentEntityIDs) {
               ros::serialization::serializationLength(legacy_full_update));
 }
 
+TEST(SceneContract, MixedSlotIdentityChangesPresentationButPreservesSceneModelAnchors) {
+    visualization_msgs::Marker mesh;
+    mesh.type = visualization_msgs::Marker::MESH_RESOURCE;
+    mesh.mesh_resource = "package://scout_description/meshes/base_link.dae";
+    mesh.pose.orientation.w = 1.0;
+    mesh.scale.x = mesh.scale.y = mesh.scale.z = 1.0;
+
+    visualization_msgs::Marker path;
+    path.type = visualization_msgs::Marker::LINE_STRIP;
+    path.ns = "ugv1_actual_path";
+    path.pose.orientation.w = 1.0;
+    path.scale.x = 0.02;
+    path.points.resize(2);
+    path.points[1].x = 1.0;
+
+    visualization_msgs::Marker label;
+    label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+    label.header.frame_id = "ugv1/label";
+    label.pose.orientation.w = 1.0;
+    label.text = "ugv1";
+    label.scale.z = 0.32;
+
+    visualization_msgs::MarkerArray markers;
+    markers.markers = {mesh, path, label};
+    applyExperimentSlotLabel(&markers, 0U, "uav7");
+
+    // Re-labeling is presentation-only. The scene-model marker namespace and
+    // anchor frame remain ugv1 so pose/TF lookup cannot drift to the slot name.
+    EXPECT_EQ(markers.markers[0].mesh_resource, mesh.mesh_resource);
+    EXPECT_EQ(markers.markers[1].ns, "ugv1_actual_path");
+    EXPECT_EQ(markers.markers[2].header.frame_id, "ugv1/label");
+    EXPECT_EQ(markers.markers[2].text, "uav7");
+
+    foxglove_msgs::SceneUpdate label_update;
+    appendSceneEntityPart(RobotModelKind::kScout, "uav7", SceneEntityPart::kLabel, markers, 0U,
+                          ros::Time(42, 0), "world", blackLabelStyle(), &label_update);
+    ASSERT_EQ(label_update.entities.size(), 1U);
+    EXPECT_EQ(label_update.entities[0].id, "xgc2/scout/uav7/label");
+    EXPECT_EQ(label_update.entities[0].frame_id, "ugv1/label");
+    ASSERT_EQ(label_update.entities[0].texts.size(), 1U);
+    EXPECT_EQ(label_update.entities[0].texts[0].text, "uav7");
+    EXPECT_TRUE(label_update.entities[0].models.empty());
+
+    foxglove_msgs::SceneUpdate path_update;
+    appendSceneEntityPart(RobotModelKind::kScout, "uav7", SceneEntityPart::kPath, markers, 0U,
+                          ros::Time(42, 0), "world", blackLabelStyle(), &path_update);
+    ASSERT_EQ(path_update.entities.size(), 1U);
+    EXPECT_EQ(path_update.entities[0].id, "xgc2/scout/uav7/path");
+    EXPECT_EQ(path_update.entities[0].frame_id, "world");
+    ASSERT_EQ(path_update.entities[0].lines.size(), 1U);
+    EXPECT_TRUE(path_update.entities[0].models.empty());
+}
+
 TEST(SceneContract, SceneCadenceSeparatesRobotAndPathUpdatesWithoutDrift) {
     SceneUpdateCadence cadence(10.0, 2.0);
 

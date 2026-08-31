@@ -92,6 +92,14 @@ std::string sceneEntityID(RobotModelKind kind, const std::string& model_name);
 
 std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name, SceneEntityPart part);
 
+// Replace only the operator-facing text generated for one Robot. Marker
+// frames, namespaces, paths, and geometry continue to use the Gazebo / VRPN
+// scene-model identity, while the visible label uses the Experiment slot
+// identity. This is what lets a mixed fleet present slot `uav7` while its
+// physical/simulation pose remains anchored to scene model `ugv1`.
+void applyExperimentSlotLabel(visualization_msgs::MarkerArray* markers, std::size_t first_marker,
+                              const std::string& slot_name);
+
 void appendSceneEntity(RobotModelKind kind, const std::string& model_name,
                        const visualization_msgs::MarkerArray& markers, std::size_t first_marker,
                        const ros::Time& timestamp, const std::string& frame_id, const SceneLabelStyle& label_style,

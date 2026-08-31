@@ -193,6 +193,19 @@ std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name
     return part == SceneEntityPart::kPath ? robot_id + "/path" : robot_id + "/label";
 }
 
+void applyExperimentSlotLabel(visualization_msgs::MarkerArray* markers, std::size_t first_marker,
+                              const std::string& slot_name) {
+    if (markers == nullptr || first_marker > markers->markers.size() || slot_name.empty()) {
+        throw std::invalid_argument("slot label markers, range, and identity must be valid");
+    }
+    for (std::size_t index = first_marker; index < markers->markers.size(); ++index) {
+        visualization_msgs::Marker& marker = markers->markers[index];
+        if (marker.type == visualization_msgs::Marker::TEXT_VIEW_FACING) {
+            marker.text = slot_name;
+        }
+    }
+}
+
 SceneUpdateCadence::SceneUpdateCadence(double label_publish_rate, double path_publish_rate)
     : label_publish_rate_(std::max(1.0, label_publish_rate)), path_publish_rate_(std::max(0.1, path_publish_rate)) {}
 
