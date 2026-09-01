@@ -117,6 +117,7 @@ class GazeboAutoVisualizer {
         private_nh_.param("publish_scene_paths", publish_scene_paths_, true);
         private_nh_.param("publish_paths", publish_paths_, false);
         private_nh_.param("publish_rate", publish_rate_, 30.0);
+        private_nh_.param("pose_transform_publish_rate", pose_transform_publish_rate_, 120.0);
         private_nh_.param("scene_publish_rate", scene_publish_rate_, 10.0);
         private_nh_.param("scene_path_publish_rate", scene_path_publish_rate_, 10.0);
         // The gradient is deliberate. A pose is what an operator reads, so it runs
@@ -152,6 +153,7 @@ class GazeboAutoVisualizer {
         private_nh_.param("mecanum_mesh_scale", mecanum_mesh_scale_, 0.001);
 
         publish_rate_ = std::max(1.0, publish_rate_);
+        pose_transform_publish_rate_ = std::max(1.0, pose_transform_publish_rate_);
         scene_publish_rate_ = std::min(publish_rate_, std::max(1.0, scene_publish_rate_));
         scene_path_publish_rate_ = std::min(publish_rate_, std::max(0.1, scene_path_publish_rate_));
         joint_transform_publish_rate_ = std::min(publish_rate_, std::max(0.1, joint_transform_publish_rate_));
@@ -232,6 +234,9 @@ class GazeboAutoVisualizer {
             if (transform_topic_ != "/tf") {
                 tf_tree_pub_ = nh_.advertise<tf2_msgs::TFMessage>("/tf", 10, false);
             }
+            pose_transform_timer_ = nh_.createTimer(
+                ros::Duration(1.0 / pose_transform_publish_rate_),
+                &GazeboAutoVisualizer::publishPoseTransformsCallback, this);
         }
 
         publish_timer_ =
@@ -249,6 +254,7 @@ class GazeboAutoVisualizer {
         std::string ros_namespace;
         gazebo_sim_visualization::RobotModelKind kind;
         gazebo_sim_visualization::CanonicalPoseSample canonical_pose;
+        ros::Time last_pose_transform_stamp;
         bool has_mavros_state{false};
         bool mavros_armed{false};
         std::uint8_t mavros_landed_state{0};
@@ -443,13 +449,29 @@ class GazeboAutoVisualizer {
         it->second.canonical_pose.pose = copyPose(msg->pose);
         it->second.canonical_pose.stamp = msg->header.stamp;
         it->second.canonical_pose.frame_id = msg->header.frame_id;
-        if (publish_transforms_ && !msg->header.stamp.isZero() &&
-            gazebo_sim_visualization::isWorldFixedFrame(msg->header.frame_id)) {
-            tf2_msgs::TFMessage transforms;
-            transforms.transforms = gazebo_sim_visualization::canonicalRobotPoseTransforms(
-                it->second.kind, it->second.name, it->second.canonical_pose.pose,
-                msg->header.stamp, frame_id_);
-            transform_pub_.publish(transforms);
+    }
+
+    void publishPoseTransformsCallback(const ros::TimerEvent&) {
+        const ros::Time now = ros::Time::now();
+        tf2_msgs::TFMessage message;
+        std::vector<TrackedModel*> published;
+        for (auto& entry : models_) {
+            TrackedModel& model = entry.second;
+            const gazebo_sim_visualization::CanonicalWorldPose pose = selectWorldPose(model, now);
+            if (!pose.found || pose.stamp == model.last_pose_transform_stamp) {
+                continue;
+            }
+            const auto transforms = gazebo_sim_visualization::canonicalRobotPoseTransforms(
+                model.kind, model.name, pose.pose, pose.stamp, frame_id_);
+            message.transforms.insert(message.transforms.end(), transforms.begin(), transforms.end());
+            published.push_back(&model);
+        }
+        if (message.transforms.empty()) {
+            return;
+        }
+        transform_pub_.publish(message);
+        for (TrackedModel* model : published) {
+            model->last_pose_transform_stamp = model->canonical_pose.stamp;
         }
     }
 
@@ -717,6 +739,7 @@ class GazeboAutoVisualizer {
     ros::Publisher scene_update_pub_;
     ros::Publisher scene_ready_pub_;
     ros::Timer publish_timer_;
+    ros::Timer pose_transform_timer_;
     // Deliberately not tf2_ros::TransformBroadcaster: that publishes to the
     // global /tf, where a simulator already broadcasts the same frame names at
     // its own rate. Two publishers of one frame is a race, and forwarding /tf to
@@ -753,6 +776,7 @@ class GazeboAutoVisualizer {
     std::string ugv_cmd_vel_topic_suffix_{"/cmd_vel"};
     std::string ugv_twist_topic_suffix_{"/twist"};
     double publish_rate_{30.0};
+    double pose_transform_publish_rate_{120.0};
     double scene_publish_rate_{10.0};
     double scene_path_publish_rate_{2.0};
     double path_publish_rate_{xgc2_robot_visualization::kDefaultPathPublishRateHz};
