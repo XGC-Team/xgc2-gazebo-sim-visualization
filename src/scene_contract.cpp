@@ -199,7 +199,7 @@ std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name
     return part == SceneEntityPart::kPath ? robot_id + "/path" : robot_id + "/label";
 }
 
-std::string canonicalSlotPoseTopic(const std::string& ros_namespace) {
+std::string slotVisualizationPoseTopic(RobotModelKind kind, const std::string& ros_namespace) {
     if (ros_namespace.size() < 2U || ros_namespace.front() != '/' || ros_namespace.back() == '/') {
         throw std::invalid_argument("canonical pose namespace must be an absolute ROS namespace");
     }
@@ -207,7 +207,12 @@ std::string canonicalSlotPoseTopic(const std::string& ros_namespace) {
     if (!canonicalROSIdentifier(identity) || identity.find('/') != std::string::npos) {
         throw std::invalid_argument("canonical pose namespace must be /<slot>");
     }
-    return ros_namespace + "/pose";
+    if (kind == RobotModelKind::kNone) {
+        throw std::invalid_argument("visualization pose requires a concrete robot model kind");
+    }
+    return kind == RobotModelKind::kFs150
+               ? ros_namespace + "/mavros/local_position/pose"
+               : ros_namespace + "/pose";
 }
 
 std::vector<geometry_msgs::TransformStamped>

@@ -2,8 +2,8 @@
 
 ROS Noetic adapter that places frozen Experiment robots into RViz and Lichtblick.
 
-`gazebo_auto_visualizer_node` consumes each slot's canonical world pose
-`/<namespace>/pose` and drives reusable visualizers from
+`gazebo_auto_visualizer_node` consumes one slot-owned viewer pose and drives
+reusable visualizers from
 `xgc2_robot_visualization`. It does not select among raw VRPN, Gazebo truth,
 MAVROS `local_position`, or TF, and it does not apply `localizationOffset` or
 `hybridSource`. Those are already decided by the upstream projection.
@@ -36,7 +36,11 @@ auto-discovery and no `tracked_uav_models` / `tracked_ugv_models` alias.
 
 Robot body placement, slot labels, and history Path all read one sample:
 
-- Topic: `/<namespace>/pose` (`geometry_msgs/PoseStamped`)
+- FS150 topic: `/<namespace>/mavros/local_position/pose`
+  (`geometry_msgs/PoseStamped`). This is the PX4/MAVROS fused estimate, so the
+  3D model exposes a broken vision/EKF alignment before takeoff.
+- Scout/Mecanum topic: `/<namespace>/pose` (`geometry_msgs/PoseStamped`), after
+  the Experiment's one localization offset.
 - Frame: product Fixed Frame `world` ENU. `map`, `odom`, and MAVROS local
   frames are refused.
 - Freshness: `canonical_pose_timeout` (default `0.5` s) applies only to that
@@ -44,7 +48,7 @@ Robot body placement, slot labels, and history Path all read one sample:
   another source.
 
 A frozen roster (`XGC2_ROBOT_VISUALIZATION_ROSTER`) maps scene-model identity
-used by URDF/TF to the Experiment slot namespace that owns `/<slot>/pose`.
+used by URDF/TF to the Experiment slot namespace that owns the selected topic.
 
 ## UAV rotor state
 

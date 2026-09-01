@@ -90,9 +90,10 @@ std::string sceneEntityID(RobotModelKind kind, const std::string& model_name);
 
 std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name, SceneEntityPart part);
 
-// Experiment slot identity for the canonical world pose: /<namespace>/pose.
-// Offset and hybridSource are already applied by the upstream projection.
-std::string canonicalSlotPoseTopic(const std::string& ros_namespace);
+// Experiment-slot viewer pose. PX4 deliberately follows MAVROS' fused local
+// estimate so a bad vision/EKF alignment is visible before takeoff; ground
+// robots follow the offset-corrected canonical slot pose.
+std::string slotVisualizationPoseTopic(RobotModelKind kind, const std::string& ros_namespace);
 
 // Convert one corrected canonical Robot pose into the only high-rate viewer
 // facts: the body transform and its upright overhead label anchor. Meshes and

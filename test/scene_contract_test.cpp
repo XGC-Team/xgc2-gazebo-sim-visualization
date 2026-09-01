@@ -498,10 +498,13 @@ TEST(CanonicalWorldPose, AcceptsOnlyTheSlotCanonicalWorldSample) {
     EXPECT_FALSE(isWorldFixedFrame("map"));
     EXPECT_FALSE(isWorldFixedFrame("odom"));
     EXPECT_TRUE(isWorldFixedFrame("/world"));
-    EXPECT_EQ(canonicalSlotPoseTopic("/uav7"), "/uav7/pose");
-    EXPECT_EQ(canonicalSlotPoseTopic("/ugv1"), "/ugv1/pose");
-    EXPECT_THROW(canonicalSlotPoseTopic("uav7"), std::invalid_argument);
-    EXPECT_THROW(canonicalSlotPoseTopic("/uav7/extra"), std::invalid_argument);
+    EXPECT_EQ(slotVisualizationPoseTopic(RobotModelKind::kFs150, "/uav7"),
+              "/uav7/mavros/local_position/pose");
+    EXPECT_EQ(slotVisualizationPoseTopic(RobotModelKind::kScout, "/ugv1"), "/ugv1/pose");
+    EXPECT_EQ(slotVisualizationPoseTopic(RobotModelKind::kMecanum, "/ugv2"), "/ugv2/pose");
+    EXPECT_THROW(slotVisualizationPoseTopic(RobotModelKind::kNone, "/uav7"), std::invalid_argument);
+    EXPECT_THROW(slotVisualizationPoseTopic(RobotModelKind::kFs150, "uav7"), std::invalid_argument);
+    EXPECT_THROW(slotVisualizationPoseTopic(RobotModelKind::kScout, "/uav7/extra"), std::invalid_argument);
 }
 
 TEST(WorldFixedFrameRoot, AdvertisesParentOnTfWithoutMovingDisplays) {

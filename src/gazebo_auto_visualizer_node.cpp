@@ -248,8 +248,9 @@ class GazeboAutoVisualizer {
         std::string name;
         // Experiment slot identity. Mesh/TF geometry continues to use `name`,
         // the scene-model identity (for example slot uav7 backed by model
-        // ugv1). Canonical pose is always /<ros_namespace>/pose; visible label
-        // class comes from `kind`, not from either lowercase identifier.
+        // ugv1). The slot namespace owns the selected pose topic: FS150 uses
+        // MAVROS fused local pose, while ground robots use canonical pose.
+        // Visible label class comes from `kind`, not either lowercase ID.
         std::string slot_name;
         std::string ros_namespace;
         gazebo_sim_visualization::RobotModelKind kind;
@@ -335,12 +336,13 @@ class GazeboAutoVisualizer {
     void subscribeCanonicalPoses() {
         for (auto& entry : models_) {
             TrackedModel& model = entry.second;
-            const std::string topic = gazebo_sim_visualization::canonicalSlotPoseTopic(model.ros_namespace);
+            const std::string topic =
+                gazebo_sim_visualization::slotVisualizationPoseTopic(model.kind, model.ros_namespace);
             model.pose_subscriber = nh_.subscribe<geometry_msgs::PoseStamped>(
                 topic, 10, [this, scene_model = model.name](const geometry_msgs::PoseStampedConstPtr& msg) {
                     canonicalPoseCallback(scene_model, msg);
                 });
-            ROS_INFO("[gazebo_auto_visualizer] Canonical pose for scene model '%s' slot '%s' is %s",
+            ROS_INFO("[gazebo_auto_visualizer] Viewer pose for scene model '%s' slot '%s' is %s",
                      model.name.c_str(), model.slot_name.c_str(), topic.c_str());
         }
     }
