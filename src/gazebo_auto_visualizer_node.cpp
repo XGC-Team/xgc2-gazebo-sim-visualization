@@ -123,8 +123,10 @@ class GazeboAutoVisualizer {
         // at the timer rate. A trail has to stay attached to the robot drawing it
         // -- at 0.2 Hz the history visibly trailed the aircraft -- so it sits one
         // step down. A spinning propeller or wheel indicates the vehicle is
-        // armed and moving; it is an animation, not a measurement, so it is last.
-        private_nh_.param("joint_transform_publish_rate", joint_transform_publish_rate_, 5.0);
+        // armed and moving. Its fastest visual tier is 90 rad/s, so the joint
+        // transforms stay at the 30 Hz pose cadence instead of aliasing through
+        // the old 5 Hz sampler and appearing to rotate slowly or backwards.
+        private_nh_.param("joint_transform_publish_rate", joint_transform_publish_rate_, 30.0);
         private_nh_.param("path_publish_rate", path_publish_rate_, xgc2_robot_visualization::kDefaultPathPublishRateHz);
         private_nh_.param("path_limit", path_limit_, 0);
         private_nh_.param("path_history_duration", path_history_duration_sec_,
@@ -720,7 +722,7 @@ class GazeboAutoVisualizer {
     double uav_rotor_speed_ground_rad_s_{25.0};
     double uav_rotor_speed_transition_rad_s_{90.0};
     double uav_rotor_speed_airborne_rad_s_{60.0};
-    double joint_transform_publish_rate_{5.0};
+    double joint_transform_publish_rate_{30.0};
     std::unique_ptr<gazebo_sim_visualization::PublishCadence> joint_transform_cadence_;
     std::string tracked_fs150_models_csv_;
     std::string tracked_scout_models_csv_;
