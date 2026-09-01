@@ -459,15 +459,19 @@ bool isWorldFixedFrame(const std::string& frame_id) {
     return normalizedFrameLabel(frame_id) == "world";
 }
 
-CanonicalWorldPose selectCanonicalWorldPose(const CanonicalPoseSample& pose, const ros::Time& now, double timeout_sec) {
+CanonicalWorldPose selectSlotVisualizationWorldPose(RobotModelKind kind, const CanonicalPoseSample& pose,
+                                                     const ros::Time& now, double timeout_sec) {
     CanonicalWorldPose selected;
-    if (!isFreshCanonicalSample(pose, now, timeout_sec) || !isWorldFixedFrame(pose.frame_id)) {
+    const bool fs150_fused_local_frame =
+        kind == RobotModelKind::kFs150 && (pose.frame_id == "map" || pose.frame_id == "/map");
+    if (kind == RobotModelKind::kNone || !isFreshCanonicalSample(pose, now, timeout_sec) ||
+        (!isWorldFixedFrame(pose.frame_id) && !fs150_fused_local_frame)) {
         return selected;
     }
     selected.found = true;
     selected.pose = pose.pose;
     selected.stamp = pose.stamp;
-    selected.frame_id = pose.frame_id;
+    selected.frame_id = "world";
     return selected;
 }
 

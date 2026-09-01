@@ -509,8 +509,8 @@ class GazeboAutoVisualizer {
 
     gazebo_sim_visualization::CanonicalWorldPose selectWorldPose(const TrackedModel& model,
                                                                  const ros::Time& now) const {
-        return gazebo_sim_visualization::selectCanonicalWorldPose(model.canonical_pose, now,
-                                                                  canonical_pose_timeout_sec_);
+        return gazebo_sim_visualization::selectSlotVisualizationWorldPose(
+            model.kind, model.canonical_pose, now, canonical_pose_timeout_sec_);
     }
 
     void publishPath(const TrackedModel& model, const gazebo_sim_visualization::CanonicalWorldPose& world_pose) {

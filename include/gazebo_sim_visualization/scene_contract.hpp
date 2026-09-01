@@ -121,9 +121,12 @@ void appendSceneEntityPart(RobotModelKind kind, const std::string& model_name, S
                            const ros::Time& timestamp, const std::string& frame_id, const SceneLabelStyle& label_style,
                            foxglove_msgs::SceneUpdate* update);
 
-// Body/path poses come only from the slot canonical pose already in the product
-// Fixed Frame (world ENU z-up). map/odom/NED are not converted here. There is
-// no source priority and no fallback among VRPN, Gazebo, MAVROS, or TF.
+// Body/path poses come only from the one viewer pose selected for the slot.
+// Ground robots arrive in the product Fixed Frame (world ENU z-up). FS150 is
+// deliberately different: its selected viewer pose is MAVROS' fused local
+// estimate, whose ROS frame label is `map`; its numeric ENU coordinates are
+// interpreted in the Experiment world so a bad FCU/vision alignment is visible
+// before takeoff. There is no source priority or fallback.
 bool isWorldFixedFrame(const std::string& frame_id);
 
 struct CanonicalPoseSample {
@@ -140,9 +143,12 @@ struct CanonicalWorldPose {
     std::string frame_id;
 };
 
-// Accept the single canonical world-ENU pose, or nothing. timeout_sec is a
+// Accept the kind-specific single viewer pose, or nothing. timeout_sec is a
 // freshness window on that one sample; it does not select a substitute source.
-CanonicalWorldPose selectCanonicalWorldPose(const CanonicalPoseSample& pose, const ros::Time& now, double timeout_sec);
+// FS150 accepts only MAVROS `map` (or world for a direct contract test/source);
+// ground vehicles continue to require world.
+CanonicalWorldPose selectSlotVisualizationWorldPose(RobotModelKind kind, const CanonicalPoseSample& pose,
+                                                     const ros::Time& now, double timeout_sec);
 
 // Identity child of the Fixed Frame published on /tf so RViz's Fixed Frame
 // (the parent) exists in the TF tree. Displays consume the parent, not the child.

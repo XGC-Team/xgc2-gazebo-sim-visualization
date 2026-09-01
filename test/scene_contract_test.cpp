@@ -456,7 +456,7 @@ TEST(SceneContract, HistoricalPathNamespaceIsSharedAcrossKinds) {
     }
 }
 
-TEST(CanonicalWorldPose, AcceptsOnlyTheSlotCanonicalWorldSample) {
+TEST(CanonicalWorldPose, AcceptsOnlyTheKindSpecificSlotViewerSample) {
     const ros::Time now(10, 0);
     CanonicalPoseSample pose;
     pose.available = true;
@@ -466,7 +466,8 @@ TEST(CanonicalWorldPose, AcceptsOnlyTheSlotCanonicalWorldSample) {
     pose.stamp = now;
     pose.frame_id = "world";
 
-    const CanonicalWorldPose selected = selectCanonicalWorldPose(pose, now, 0.5);
+    const CanonicalWorldPose selected =
+        selectSlotVisualizationWorldPose(RobotModelKind::kScout, pose, now, 0.5);
     ASSERT_TRUE(selected.found);
     EXPECT_EQ(selected.stamp, now);
     EXPECT_EQ(selected.frame_id, "world");
@@ -474,26 +475,36 @@ TEST(CanonicalWorldPose, AcceptsOnlyTheSlotCanonicalWorldSample) {
 
     CanonicalPoseSample map_pose = pose;
     map_pose.frame_id = "map";
-    EXPECT_FALSE(selectCanonicalWorldPose(map_pose, now, 0.5).found);
+    const CanonicalWorldPose fs150_map =
+        selectSlotVisualizationWorldPose(RobotModelKind::kFs150, map_pose, now, 0.5);
+    ASSERT_TRUE(fs150_map.found);
+    EXPECT_EQ(fs150_map.frame_id, "world");
+    EXPECT_FALSE(selectSlotVisualizationWorldPose(RobotModelKind::kScout, map_pose, now, 0.5).found);
+    EXPECT_FALSE(selectSlotVisualizationWorldPose(RobotModelKind::kMecanum, map_pose, now, 0.5).found);
+
+    CanonicalPoseSample namespaced_map = pose;
+    namespaced_map.frame_id = "uav1/map";
+    EXPECT_FALSE(selectSlotVisualizationWorldPose(RobotModelKind::kFs150, namespaced_map, now, 0.5).found);
 
     CanonicalPoseSample odom_pose = pose;
     odom_pose.frame_id = "odom";
-    EXPECT_FALSE(selectCanonicalWorldPose(odom_pose, now, 0.5).found);
+    EXPECT_FALSE(selectSlotVisualizationWorldPose(RobotModelKind::kFs150, odom_pose, now, 0.5).found);
 
     CanonicalPoseSample mavros_local = pose;
     mavros_local.frame_id = "uav1/local_origin";
-    EXPECT_FALSE(selectCanonicalWorldPose(mavros_local, now, 0.5).found);
+    EXPECT_FALSE(selectSlotVisualizationWorldPose(RobotModelKind::kFs150, mavros_local, now, 0.5).found);
 
     CanonicalPoseSample missing;
-    EXPECT_FALSE(selectCanonicalWorldPose(missing, now, 0.5).found);
+    EXPECT_FALSE(selectSlotVisualizationWorldPose(RobotModelKind::kFs150, missing, now, 0.5).found);
 
     CanonicalPoseSample zero_stamp = pose;
     zero_stamp.stamp = ros::Time();
-    EXPECT_FALSE(selectCanonicalWorldPose(zero_stamp, now, 0.5).found);
+    EXPECT_FALSE(selectSlotVisualizationWorldPose(RobotModelKind::kFs150, zero_stamp, now, 0.5).found);
 
     CanonicalPoseSample stale = pose;
     stale.stamp = ros::Time(9, 0);
-    EXPECT_FALSE(selectCanonicalWorldPose(stale, now, 0.5).found);
+    EXPECT_FALSE(selectSlotVisualizationWorldPose(RobotModelKind::kFs150, stale, now, 0.5).found);
+    EXPECT_FALSE(selectSlotVisualizationWorldPose(RobotModelKind::kNone, pose, now, 0.5).found);
 
     EXPECT_FALSE(isWorldFixedFrame("map"));
     EXPECT_FALSE(isWorldFixedFrame("odom"));

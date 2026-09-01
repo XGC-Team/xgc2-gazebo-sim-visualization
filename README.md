@@ -4,9 +4,10 @@ ROS Noetic adapter that places frozen Experiment robots into RViz and Lichtblick
 
 `gazebo_auto_visualizer_node` consumes one slot-owned viewer pose and drives
 reusable visualizers from
-`xgc2_robot_visualization`. It does not select among raw VRPN, Gazebo truth,
-MAVROS `local_position`, or TF, and it does not apply `localizationOffset` or
-`hybridSource`. Those are already decided by the upstream projection.
+`xgc2_robot_visualization`. The source is fixed by kind: FS150 uses the fused
+MAVROS local pose, while ground robots use the slot pose after localization
+projection. It does not fall back to raw VRPN, Gazebo truth, or TF, and it does
+not apply `localizationOffset` or `hybridSource` itself.
 
 The Mecanum renderer is a required build dependency. Standalone CI builds its
 immutable capability source when production APT has not caught up; release
@@ -41,8 +42,11 @@ Robot body placement, slot labels, and history Path all read one sample:
   3D model exposes a broken vision/EKF alignment before takeoff.
 - Scout/Mecanum topic: `/<namespace>/pose` (`geometry_msgs/PoseStamped`), after
   the Experiment's one localization offset.
-- Frame: product Fixed Frame `world` ENU. `map`, `odom`, and MAVROS local
-  frames are refused.
+- Frame: ground-robot poses must be product Fixed Frame `world` ENU. FS150
+  admits the exact MAVROS `map` label and interprets its fused ENU coordinates
+  in Experiment `world`; this is intentional so a disagreement between the
+  FCU estimate and the expected Experiment pose is visible before takeoff.
+  `odom`, namespaced frame aliases, and every fallback remain refused.
 - Freshness: `canonical_pose_timeout` (default `0.5` s) applies only to that
   sample. A missing or stale pose hides that robot; it does not fall back to
   another source.
