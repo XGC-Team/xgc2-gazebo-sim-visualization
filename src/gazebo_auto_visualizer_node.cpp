@@ -443,6 +443,14 @@ class GazeboAutoVisualizer {
         it->second.canonical_pose.pose = copyPose(msg->pose);
         it->second.canonical_pose.stamp = msg->header.stamp;
         it->second.canonical_pose.frame_id = msg->header.frame_id;
+        if (publish_transforms_ && !msg->header.stamp.isZero() &&
+            gazebo_sim_visualization::isWorldFixedFrame(msg->header.frame_id)) {
+            tf2_msgs::TFMessage transforms;
+            transforms.transforms = gazebo_sim_visualization::canonicalRobotPoseTransforms(
+                it->second.kind, it->second.name, it->second.canonical_pose.pose,
+                msg->header.stamp, frame_id_);
+            transform_pub_.publish(transforms);
+        }
     }
 
     void mavrosStateCallback(const std::string& name, const mavros_msgs::StateConstPtr& msg) {
@@ -597,6 +605,10 @@ class GazeboAutoVisualizer {
         gazebo_sim_visualization::SceneUpdateCadenceDecision scene_decision;
         if (publish_scene_update_) {
             scene_decision = scene_update_cadence_->take(now);
+            if (!publish_scene_paths_) {
+                scene_decision.publish_label = !scene_labels_published_;
+                scene_decision.publish_path = false;
+            }
         }
         if (!publish_markers_ && !publish_transforms_ && !publish_paths_ && !scene_decision.publish_label &&
             !scene_decision.publish_path) {
@@ -662,7 +674,9 @@ class GazeboAutoVisualizer {
                     outgoing.push_back(root);
                 }
                 for (const geometry_msgs::TransformStamped& transform : transforms) {
-                    if (publish_joints || transform.header.frame_id == frame_id_) {
+                    // Body and upright label-anchor transforms follow each
+                    // canonical pose callback. The timer owns only child joints.
+                    if (publish_joints && transform.header.frame_id != frame_id_) {
                         outgoing.push_back(transform);
                     }
                 }
@@ -680,8 +694,14 @@ class GazeboAutoVisualizer {
         if (publish_markers_) {
             marker_pub_.publish(markers);
         }
-        if (publish_scene_update_ && !scene_update.entities.empty()) {
+        const bool complete_static_labels = !publish_scene_paths_ && scene_decision.publish_label &&
+                                            world_pose_count == models_.size();
+        if (publish_scene_update_ && !scene_update.entities.empty() &&
+            (publish_scene_paths_ || complete_static_labels)) {
             scene_update_pub_.publish(scene_update);
+            if (complete_static_labels) {
+                scene_labels_published_ = true;
+            }
         }
         if (!scene_ready_published_ && publish_transforms_ && publish_paths_ &&
             gazebo_sim_visualization::frozenVisualizationRosterReady(models_.size(), world_pose_count)) {
@@ -755,6 +775,7 @@ class GazeboAutoVisualizer {
     bool publish_scene_update_{false};
     bool publish_scene_paths_{true};
     bool publish_paths_{false};
+    bool scene_labels_published_{false};
     bool scene_ready_published_{false};
 };
 

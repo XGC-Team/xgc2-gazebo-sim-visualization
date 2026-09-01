@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <set>
 #include <string>
+#include <vector>
 
 #include <foxglove_msgs/Color.h>
 #include <foxglove_msgs/SceneUpdate.h>
@@ -92,6 +93,14 @@ std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name
 // Experiment slot identity for the canonical world pose: /<namespace>/pose.
 // Offset and hybridSource are already applied by the upstream projection.
 std::string canonicalSlotPoseTopic(const std::string& ros_namespace);
+
+// Convert one corrected canonical Robot pose into the only high-rate viewer
+// facts: the body transform and its upright overhead label anchor. Meshes and
+// label text stay static; rotor/wheel joints use their own bounded cadence.
+std::vector<geometry_msgs::TransformStamped>
+canonicalRobotPoseTransforms(RobotModelKind kind, const std::string& scene_model,
+                             const geometry_msgs::Pose& pose, const ros::Time& stamp,
+                             const std::string& frame_id);
 
 // Replace only the operator-facing text generated for one Robot. The concrete
 // robot kind owns the class word (FS150 -> UAV, Scout/Mecanum -> UGV), while

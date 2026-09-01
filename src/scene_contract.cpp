@@ -19,6 +19,8 @@
 #include <std_msgs/ColorRGBA.h>
 #include <visualization_msgs/Marker.h>
 
+#include "xgc2_robot_visualization/robot_frames.hpp"
+
 namespace gazebo_sim_visualization {
 namespace {
 
@@ -206,6 +208,49 @@ std::string canonicalSlotPoseTopic(const std::string& ros_namespace) {
         throw std::invalid_argument("canonical pose namespace must be /<slot>");
     }
     return ros_namespace + "/pose";
+}
+
+std::vector<geometry_msgs::TransformStamped>
+canonicalRobotPoseTransforms(RobotModelKind kind, const std::string& scene_model,
+                             const geometry_msgs::Pose& pose, const ros::Time& stamp,
+                             const std::string& frame_id) {
+    if (kind == RobotModelKind::kNone || !canonicalROSIdentifier(scene_model) || !isWorldFixedFrame(frame_id) ||
+        stamp.isZero()) {
+        throw std::invalid_argument("canonical Robot pose transform identity must be complete");
+    }
+
+    double label_height = 0.0;
+    switch (kind) {
+    case RobotModelKind::kFs150:
+        label_height = 0.55;
+        break;
+    case RobotModelKind::kScout:
+        label_height = 0.65;
+        break;
+    case RobotModelKind::kMecanum:
+        label_height = 0.32;
+        break;
+    case RobotModelKind::kNone:
+        throw std::invalid_argument("canonical Robot pose transform requires a concrete kind");
+    }
+
+    geometry_msgs::TransformStamped body;
+    body.header.stamp = stamp;
+    body.header.frame_id = frame_id;
+    body.child_frame_id = xgc2_robot_visualization::robotBodyFrame(scene_model);
+    body.transform.translation.x = pose.position.x;
+    body.transform.translation.y = pose.position.y;
+    body.transform.translation.z = pose.position.z;
+    body.transform.rotation = normalizedQuaternion(pose.orientation);
+
+    geometry_msgs::TransformStamped label;
+    label.header = body.header;
+    label.child_frame_id = xgc2_robot_visualization::robotLabelFrame(scene_model);
+    label.transform.translation.x = pose.position.x;
+    label.transform.translation.y = pose.position.y;
+    label.transform.translation.z = pose.position.z + label_height;
+    label.transform.rotation.w = 1.0;
+    return {body, label};
 }
 
 void applyRobotMarkerLabel(visualization_msgs::MarkerArray* markers, std::size_t first_marker, RobotModelKind kind,

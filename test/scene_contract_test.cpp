@@ -1,5 +1,6 @@
 #include "gazebo_sim_visualization/scene_contract.hpp"
 
+#include <cmath>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -125,6 +126,42 @@ TEST(SceneContract, RobotKindOwnsUppercaseMarkerClassAndCanonicalNamespaceOwnsNu
     EXPECT_THROW(applyRobotMarkerLabel(&markers, 0U, RobotModelKind::kNone, "/uav1"), std::invalid_argument);
     EXPECT_THROW(applyRobotMarkerLabel(&markers, 0U, RobotModelKind::kFs150, "uav1"), std::invalid_argument);
     EXPECT_THROW(applyRobotMarkerLabel(&markers, 0U, RobotModelKind::kScout, "/scout1"), std::invalid_argument);
+}
+
+TEST(SceneContract, CanonicalPosePublishesOnlyBodyAndUprightLabelTransforms) {
+    geometry_msgs::Pose pose;
+    pose.position.x = 1.0;
+    pose.position.y = -2.0;
+    pose.position.z = 3.0;
+    pose.orientation.z = std::sqrt(0.5);
+    pose.orientation.w = std::sqrt(0.5);
+    const ros::Time stamp(12, 34);
+
+    struct Case {
+        RobotModelKind kind;
+        const char* name;
+        double label_height;
+    };
+    const Case cases[] = {
+        {RobotModelKind::kFs150, "uav1", 0.55},
+        {RobotModelKind::kScout, "ugv1", 0.65},
+        {RobotModelKind::kMecanum, "ugv2", 0.32},
+    };
+    for (const Case& test_case : cases) {
+        const auto transforms = canonicalRobotPoseTransforms(test_case.kind, test_case.name, pose, stamp, "world");
+        ASSERT_EQ(transforms.size(), 2U);
+        EXPECT_EQ(transforms[0].child_frame_id, std::string(test_case.name) + "/base_link");
+        EXPECT_EQ(transforms[1].child_frame_id, std::string(test_case.name) + "/label");
+        EXPECT_EQ(transforms[0].header.stamp, stamp);
+        EXPECT_DOUBLE_EQ(transforms[0].transform.translation.x, pose.position.x);
+        EXPECT_NEAR(transforms[0].transform.rotation.z, std::sqrt(0.5), 1.0e-12);
+        EXPECT_DOUBLE_EQ(transforms[1].transform.translation.z, pose.position.z + test_case.label_height);
+        EXPECT_DOUBLE_EQ(transforms[1].transform.rotation.w, 1.0);
+    }
+    EXPECT_THROW(canonicalRobotPoseTransforms(RobotModelKind::kNone, "uav1", pose, stamp, "world"),
+                 std::invalid_argument);
+    EXPECT_THROW(canonicalRobotPoseTransforms(RobotModelKind::kFs150, "uav1", pose, ros::Time(), "world"),
+                 std::invalid_argument);
 }
 
 TEST(SceneContract, ScoutMarkersBecomeScoutSceneEntity) {
