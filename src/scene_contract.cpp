@@ -208,15 +208,36 @@ std::string canonicalSlotPoseTopic(const std::string& ros_namespace) {
     return ros_namespace + "/pose";
 }
 
-void applyExperimentSlotLabel(visualization_msgs::MarkerArray* markers, std::size_t first_marker,
-                              const std::string& slot_name) {
-    if (markers == nullptr || first_marker > markers->markers.size() || slot_name.empty()) {
-        throw std::invalid_argument("slot label markers, range, and identity must be valid");
+void applyRobotMarkerLabel(visualization_msgs::MarkerArray* markers, std::size_t first_marker, RobotModelKind kind,
+                           const std::string& ros_namespace) {
+    if (markers == nullptr || first_marker > markers->markers.size()) {
+        throw std::invalid_argument("robot label markers and range must be valid");
     }
+
+    static const std::regex namespace_pattern("^/(?:uav|ugv)([0-9]+)$");
+    std::smatch namespace_match;
+    if (!std::regex_match(ros_namespace, namespace_match, namespace_pattern)) {
+        throw std::invalid_argument("robot label namespace must be canonical /uavN or /ugvN");
+    }
+
+    const char* class_label = nullptr;
+    switch (kind) {
+    case RobotModelKind::kFs150:
+        class_label = "UAV";
+        break;
+    case RobotModelKind::kScout:
+    case RobotModelKind::kMecanum:
+        class_label = "UGV";
+        break;
+    case RobotModelKind::kNone:
+        throw std::invalid_argument("robot label requires a concrete robot model kind");
+    }
+
+    const std::string display_label = std::string(class_label) + " " + namespace_match.str(1);
     for (std::size_t index = first_marker; index < markers->markers.size(); ++index) {
         visualization_msgs::Marker& marker = markers->markers[index];
         if (marker.type == visualization_msgs::Marker::TEXT_VIEW_FACING) {
-            marker.text = slot_name;
+            marker.text = display_label;
         }
     }
 }

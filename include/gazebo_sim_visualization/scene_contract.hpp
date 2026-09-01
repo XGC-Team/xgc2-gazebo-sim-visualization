@@ -93,13 +93,13 @@ std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name
 // Offset and hybridSource are already applied by the upstream projection.
 std::string canonicalSlotPoseTopic(const std::string& ros_namespace);
 
-// Replace only the operator-facing text generated for one Robot. Marker
-// frames, namespaces, paths, and geometry continue to use the scene-model
-// identity, while the visible label uses the Experiment slot identity. Pose
-// itself is consumed from the slot canonical topic, not from scene-model
-// VRPN/Gazebo/MAVROS/TF.
-void applyExperimentSlotLabel(visualization_msgs::MarkerArray* markers, std::size_t first_marker,
-                              const std::string& slot_name);
+// Replace only the operator-facing text generated for one Robot. The concrete
+// robot kind owns the class word (FS150 -> UAV, Scout/Mecanum -> UGV), while
+// the canonical lowercase /uavN or /ugvN namespace owns N. This also keeps a
+// mixed-scene Scout in slot /uav7 visibly identified as UGV 7 without changing
+// its ROS interface or its scene-model marker/frame identity.
+void applyRobotMarkerLabel(visualization_msgs::MarkerArray* markers, std::size_t first_marker, RobotModelKind kind,
+                           const std::string& ros_namespace);
 
 void appendSceneEntity(RobotModelKind kind, const std::string& model_name,
                        const visualization_msgs::MarkerArray& markers, std::size_t first_marker,

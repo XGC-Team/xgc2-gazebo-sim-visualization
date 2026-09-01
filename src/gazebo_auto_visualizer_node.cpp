@@ -239,9 +239,10 @@ class GazeboAutoVisualizer {
   private:
     struct TrackedModel {
         std::string name;
-        // Operator-facing Experiment slot identity. Mesh/TF geometry continues
-        // to use `name`, the scene-model identity (for example slot uav7 backed
-        // by model ugv1). Canonical pose is always /<ros_namespace>/pose.
+        // Experiment slot identity. Mesh/TF geometry continues to use `name`,
+        // the scene-model identity (for example slot uav7 backed by model
+        // ugv1). Canonical pose is always /<ros_namespace>/pose; visible label
+        // class comes from `kind`, not from either lowercase identifier.
         std::string slot_name;
         std::string ros_namespace;
         gazebo_sim_visualization::RobotModelKind kind;
@@ -627,7 +628,7 @@ class GazeboAutoVisualizer {
             } else {
                 ugv_visualizer_->append(makeUgvVisualState(model, *pose, now), &markers, &transforms);
             }
-            gazebo_sim_visualization::applyExperimentSlotLabel(&markers, first_marker, model.slot_name);
+            gazebo_sim_visualization::applyRobotMarkerLabel(&markers, first_marker, model.kind, model.ros_namespace);
             if (publish_scene_paths_ && scene_decision.publish_path) {
                 gazebo_sim_visualization::appendSceneEntityPart(
                     model.kind, model.slot_name, gazebo_sim_visualization::SceneEntityPart::kPath, markers,

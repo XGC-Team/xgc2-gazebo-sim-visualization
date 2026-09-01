@@ -90,6 +90,43 @@ TEST(SceneContract, ModelListsMustBeDisjoint) {
     EXPECT_FALSE(modelListsAreDisjoint({"shared"}, {"ugv1"}, {"shared"}));
 }
 
+TEST(SceneContract, RobotKindOwnsUppercaseMarkerClassAndCanonicalNamespaceOwnsNumber) {
+    struct Case {
+        RobotModelKind kind;
+        const char* ros_namespace;
+        const char* expected;
+    };
+    const Case cases[] = {
+        {RobotModelKind::kFs150, "/uav1", "UAV 1"},
+        {RobotModelKind::kScout, "/ugv2", "UGV 2"},
+        {RobotModelKind::kMecanum, "/ugv3", "UGV 3"},
+        // Mixed fleets may bind a Scout scene model to a /uavN slot. Robot
+        // category, not the lowercase interface prefix, still owns UGV.
+        {RobotModelKind::kScout, "/uav7", "UGV 7"},
+    };
+
+    for (const Case& test_case : cases) {
+        visualization_msgs::Marker untouched;
+        untouched.type = visualization_msgs::Marker::LINE_STRIP;
+        untouched.text = "unchanged";
+        visualization_msgs::Marker label;
+        label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+        label.text = "lowercase-interface-name";
+        visualization_msgs::MarkerArray markers;
+        markers.markers = {untouched, label};
+
+        applyRobotMarkerLabel(&markers, 1U, test_case.kind, test_case.ros_namespace);
+
+        EXPECT_EQ(markers.markers[0].text, "unchanged");
+        EXPECT_EQ(markers.markers[1].text, test_case.expected);
+    }
+
+    visualization_msgs::MarkerArray markers;
+    EXPECT_THROW(applyRobotMarkerLabel(&markers, 0U, RobotModelKind::kNone, "/uav1"), std::invalid_argument);
+    EXPECT_THROW(applyRobotMarkerLabel(&markers, 0U, RobotModelKind::kFs150, "uav1"), std::invalid_argument);
+    EXPECT_THROW(applyRobotMarkerLabel(&markers, 0U, RobotModelKind::kScout, "/scout1"), std::invalid_argument);
+}
+
 TEST(SceneContract, ScoutMarkersBecomeScoutSceneEntity) {
     visualization_msgs::Marker marker;
     marker.type = visualization_msgs::Marker::MESH_RESOURCE;
@@ -223,14 +260,14 @@ TEST(SceneContract, MixedSlotIdentityChangesPresentationButPreservesSceneModelAn
 
     visualization_msgs::MarkerArray markers;
     markers.markers = {mesh, path, label};
-    applyExperimentSlotLabel(&markers, 0U, "uav7");
+    applyRobotMarkerLabel(&markers, 0U, RobotModelKind::kScout, "/uav7");
 
     // Re-labeling is presentation-only. The scene-model marker namespace and
     // anchor frame remain ugv1 so pose/TF lookup cannot drift to the slot name.
     EXPECT_EQ(markers.markers[0].mesh_resource, mesh.mesh_resource);
     EXPECT_EQ(markers.markers[1].ns, "ugv1_actual_path");
     EXPECT_EQ(markers.markers[2].header.frame_id, "ugv1/label");
-    EXPECT_EQ(markers.markers[2].text, "uav7");
+    EXPECT_EQ(markers.markers[2].text, "UGV 7");
 
     foxglove_msgs::SceneUpdate label_update;
     appendSceneEntityPart(RobotModelKind::kScout, "uav7", SceneEntityPart::kLabel, markers, 0U,
@@ -239,7 +276,7 @@ TEST(SceneContract, MixedSlotIdentityChangesPresentationButPreservesSceneModelAn
     EXPECT_EQ(label_update.entities[0].id, "xgc2/scout/uav7/label");
     EXPECT_EQ(label_update.entities[0].frame_id, "ugv1/label");
     ASSERT_EQ(label_update.entities[0].texts.size(), 1U);
-    EXPECT_EQ(label_update.entities[0].texts[0].text, "uav7");
+    EXPECT_EQ(label_update.entities[0].texts[0].text, "UGV 7");
     EXPECT_TRUE(label_update.entities[0].models.empty());
 
     foxglove_msgs::SceneUpdate path_update;
