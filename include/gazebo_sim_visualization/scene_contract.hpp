@@ -155,9 +155,10 @@ CanonicalWorldPose selectSlotVisualizationWorldPose(RobotModelKind kind, const C
 constexpr const char* kWorldFixedFrameRootChild = "xgc_origin";
 geometry_msgs::TransformStamped worldFixedFrameRoot(const std::string& frame_id, const ros::Time& stamp);
 
-// Runtime readiness is a whole frozen-roster fact. A reset SceneUpdate or the
-// first Robot pose must not make a multi-Robot viewer ready while siblings are
-// still absent from its transform and Path trees.
+// Runtime readiness is "the frozen roster is configured and this node can
+// publish". Physical runs often have no VRPN, no camera, and only a subset of
+// robots on the field; missing sibling poses must not block Lichtblick or fail
+// the Experiment. Surplus poses (more than the frozen roster) remain invalid.
 bool frozenVisualizationRosterReady(std::size_t tracked_models, std::size_t world_poses);
 
 } // namespace gazebo_sim_visualization

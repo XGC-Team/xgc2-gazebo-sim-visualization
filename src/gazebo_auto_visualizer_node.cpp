@@ -718,12 +718,12 @@ class GazeboAutoVisualizer {
         if (publish_markers_) {
             marker_pub_.publish(markers);
         }
-        const bool complete_static_labels = !publish_scene_paths_ && scene_decision.publish_label &&
-                                            world_pose_count == models_.size();
+        const bool partial_static_labels = !publish_scene_paths_ && scene_decision.publish_label &&
+                                           !scene_update.entities.empty();
         if (publish_scene_update_ && !scene_update.entities.empty() &&
-            (publish_scene_paths_ || complete_static_labels)) {
+            (publish_scene_paths_ || partial_static_labels)) {
             scene_update_pub_.publish(scene_update);
-            if (complete_static_labels) {
+            if (partial_static_labels && world_pose_count == models_.size()) {
                 scene_labels_published_ = true;
             }
         }
@@ -731,7 +731,8 @@ class GazeboAutoVisualizer {
             gazebo_sim_visualization::frozenVisualizationRosterReady(models_.size(), world_pose_count)) {
             scene_ready_pub_.publish(std_msgs::Empty());
             scene_ready_published_ = true;
-            ROS_INFO_STREAM("published frozen visualization readiness for " << world_pose_count << " Robot(s)");
+            ROS_INFO_STREAM("published frozen visualization readiness for " << world_pose_count << "/"
+                                                                            << models_.size() << " Robot(s)");
         }
     }
 

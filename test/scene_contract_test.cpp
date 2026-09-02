@@ -530,11 +530,11 @@ TEST(WorldFixedFrameRoot, AdvertisesParentOnTfWithoutMovingDisplays) {
     EXPECT_DOUBLE_EQ(root.transform.rotation.w, 1.0);
 }
 
-TEST(FrozenVisualizationRosterReady, RequiresEveryTrackedWorldPose) {
+TEST(FrozenVisualizationRosterReady, AllowsMissingSiblingPoses) {
     EXPECT_FALSE(frozenVisualizationRosterReady(0U, 0U));
-    EXPECT_FALSE(frozenVisualizationRosterReady(4U, 0U));
-    EXPECT_FALSE(frozenVisualizationRosterReady(4U, 1U));
-    EXPECT_FALSE(frozenVisualizationRosterReady(4U, 3U));
+    EXPECT_TRUE(frozenVisualizationRosterReady(4U, 0U));
+    EXPECT_TRUE(frozenVisualizationRosterReady(4U, 1U));
+    EXPECT_TRUE(frozenVisualizationRosterReady(4U, 3U));
     EXPECT_TRUE(frozenVisualizationRosterReady(4U, 4U));
     EXPECT_FALSE(frozenVisualizationRosterReady(4U, 5U));
 }
