@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -144,8 +145,8 @@ class GazeboAutoVisualizer {
         private_nh_.param("joint_transform_publish_rate", joint_transform_publish_rate_, 30.0);
         private_nh_.param("path_publish_rate", path_publish_rate_, xgc2_robot_visualization::kDefaultPathPublishRateHz);
         private_nh_.param("path_limit", path_limit_, 0);
-        private_nh_.param("path_history_duration", path_history_duration_sec_,
-                          xgc2_robot_visualization::kDefaultPathHistoryDurationSec);
+        path_history_duration_sec_ = xgc2_robot_visualization::kDefaultPathHistoryDurationSec;
+        path_limit_ = 0;
         private_nh_.param("canonical_pose_timeout", canonical_pose_timeout_sec_, 0.5);
         private_nh_.param("mavros_state_timeout", mavros_state_timeout_sec_, 2.0);
         private_nh_.param<std::string>("mavros_state_topic_suffix", mavros_state_topic_suffix_, "/mavros/state");
@@ -241,6 +242,9 @@ class GazeboAutoVisualizer {
             height_projection_pub_ = nh_.advertise<foxglove_msgs::SceneUpdate>(
                 gazebo_sim_visualization::kUavHeightProjectionTopic, 1, true);
             publishSceneReset(height_projection_pub_);
+            height_projection_ar_pub_ = nh_.advertise<foxglove_msgs::SceneUpdate>(
+                gazebo_sim_visualization::kUavHeightProjectionArTopic, 1, true);
+            publishSceneReset(height_projection_ar_pub_);
         }
         joint_transform_cadence_.reset(new gazebo_sim_visualization::PublishCadence(joint_transform_publish_rate_));
 
@@ -272,6 +276,8 @@ class GazeboAutoVisualizer {
         std::string ros_namespace;
         gazebo_sim_visualization::RobotModelKind kind;
         gazebo_sim_visualization::CanonicalPoseSample canonical_pose;
+        gazebo_sim_visualization::CanonicalPoseSample ar_pose;
+        std::array<double, 3> world_offset{{0.0, 0.0, 0.0}};
         ros::Time last_pose_transform_stamp;
         bool height_projection_enabled{false};
         foxglove_msgs::Color height_projection_color;
@@ -289,6 +295,7 @@ class GazeboAutoVisualizer {
         ros::Time cmd_vel_stamp;
         ros::Time twist_stamp;
         ros::Subscriber pose_subscriber;
+        ros::Subscriber ar_pose_subscriber;
         ros::Subscriber mavros_state_subscriber;
         ros::Subscriber cmd_vel_subscriber;
         ros::Subscriber twist_subscriber;
@@ -336,42 +343,38 @@ class GazeboAutoVisualizer {
                 tracked->second.height_projection_color =
                     gazebo_sim_visualization::sceneColorFromHex(robot.height_projection_color);
             }
-            if (!publish_paths_) {
-                continue;
+            tracked->second.world_offset = robot.world_offset;
+            if (!robot.ar_pose_topic.empty()) {
+                tracked->second.ar_pose_subscriber = nh_.subscribe<geometry_msgs::PoseStamped>(
+                    robot.ar_pose_topic, 10,
+                    [this, name = robot.scene_model](const geometry_msgs::PoseStampedConstPtr& msg) {
+                        arPoseCallback(name, msg);
+                    });
             }
-            const std::string topic =
-                xgc2_robot_visualization::namespacedPathTopic(robot.ros_namespace, robot.path_topic);
-            if (!topics.insert(topic).second) {
-                throw std::runtime_error("Path roster repeats topic '" + topic + "'");
-            }
-            PathPublisherRuntime runtime;
-            runtime.topic = topic;
-            runtime.publisher = nh_.advertise<nav_msgs::Path>(topic, 1, true);
             xgc2_robot_visualization::PathRuntimeConfig config;
             config.sample_rate_hz = path_publish_rate_;
-            config.max_age_sec = robot.history_window_sec;
+            config.max_age_sec = xgc2_robot_visualization::kDefaultPathHistoryDurationSec;
             config.max_points = 0;
-            runtime.history.reset(new xgc2_robot_visualization::BoundedPathRuntime(frame_id_, config));
-            path_publishers_.emplace(robot.scene_model, std::move(runtime));
-            if (!robot.ar_pose_topic.empty()) {
+            if (publish_paths_) {
+                const std::string topic =
+                    xgc2_robot_visualization::namespacedPathTopic(robot.ros_namespace, robot.path_topic);
+                if (!topics.insert(topic).second) {
+                    throw std::runtime_error("Path roster repeats topic '" + topic + "'");
+                }
+                PathPublisherRuntime runtime;
+                runtime.topic = topic;
+                runtime.publisher = nh_.advertise<nav_msgs::Path>(topic, 1, true);
+                runtime.history.reset(new xgc2_robot_visualization::BoundedPathRuntime(frame_id_, config));
+                path_publishers_.emplace(robot.scene_model, std::move(runtime));
+            }
+            if (!robot.ar_pose_topic.empty() && publish_paths_) {
                 PathPublisherRuntime ar;
                 ar.topic = xgc2_robot_visualization::namespacedPathTopic(robot.ros_namespace, robot.ar_path_topic);
-                if (!topics.insert(ar.topic).second) { throw std::runtime_error("AR Path topic collision"); }
+                if (!topics.insert(ar.topic).second) {
+                    throw std::runtime_error("AR Path topic collision");
+                }
                 ar.publisher = nh_.advertise<nav_msgs::Path>(ar.topic, 1, true);
                 ar.history.reset(new xgc2_robot_visualization::BoundedPathRuntime(frame_id_, config));
-                ar.subscriber = nh_.subscribe<geometry_msgs::PoseStamped>(robot.ar_pose_topic, 10,
-                    [this, name = robot.scene_model, offset = robot.world_offset](const geometry_msgs::PoseStampedConstPtr& msg) {
-                        auto found = ar_path_publishers_.find(name);
-                        if (found == ar_path_publishers_.end()) { return; }
-                        geometry_msgs::Pose pose = msg->pose;
-                        pose.position.x += offset[0];
-                        pose.position.y += offset[1];
-                        pose.position.z += offset[2];
-                        if (!isFinite(pose)) { return; }
-                        if (found->second.history->append(msg->header.stamp, pose)) {
-                            found->second.publisher.publish(found->second.history->message());
-                        }
-                    });
                 ar_path_publishers_.emplace(robot.scene_model, std::move(ar));
             }
         }
@@ -500,11 +503,34 @@ class GazeboAutoVisualizer {
         it->second.canonical_pose.frame_id = msg->header.frame_id;
     }
 
+    void arPoseCallback(const std::string& name, const geometry_msgs::PoseStampedConstPtr& msg) {
+        auto it = models_.find(name);
+        if (it == models_.end() || !isFinite(msg->pose)) {
+            return;
+        }
+        const geometry_msgs::Pose pose =
+            gazebo_sim_visualization::applyExperimentWorldOffsetOnce(msg->pose, it->second.world_offset);
+        if (!isFinite(pose)) {
+            return;
+        }
+        it->second.ar_pose.available = true;
+        it->second.ar_pose.pose = pose;
+        it->second.ar_pose.stamp = msg->header.stamp;
+        it->second.ar_pose.frame_id = "world";
+        auto found = ar_path_publishers_.find(name);
+        if (found == ar_path_publishers_.end() || !found->second.history) {
+            return;
+        }
+        if (found->second.history->append(msg->header.stamp, pose)) {
+            found->second.publisher.publish(found->second.history->message());
+        }
+    }
+
     void publishPoseTransformsCallback(const ros::TimerEvent&) {
         const ros::Time now = ros::Time::now();
+        publishHeightProjectionViews(now);
         tf2_msgs::TFMessage message;
         std::vector<TrackedModel*> published;
-        bool projection_changed = false;
         for (auto& entry : models_) {
             TrackedModel& model = entry.second;
             const gazebo_sim_visualization::CanonicalWorldPose pose = selectWorldPose(model, now);
@@ -514,28 +540,62 @@ class GazeboAutoVisualizer {
             const auto transforms = gazebo_sim_visualization::canonicalRobotPoseTransforms(
                 model.kind, model.name, pose.pose, pose.stamp, frame_id_, scene_label_offsets_);
             message.transforms.insert(message.transforms.end(), transforms.begin(), transforms.end());
-            if (height_projection_pub_ && model.height_projection_enabled) {
-                height_projection_entities_[model.name] = gazebo_sim_visualization::uavHeightProjectionEntity(
-                    model.name, pose.pose.position, pose.stamp, frame_id_, model.height_projection_color);
-                projection_changed = true;
-            }
             published.push_back(&model);
         }
         if (message.transforms.empty()) {
             return;
         }
         transform_pub_.publish(message);
-        if (projection_changed) {
-            // Keep a full projection snapshot for late subscribers; labels have their own latched topic.
-            foxglove_msgs::SceneUpdate update;
-            for (const auto& entry : height_projection_entities_) {
-                update.entities.push_back(entry.second);
-            }
-            height_projection_pub_.publish(update);
-        }
         for (TrackedModel* model : published) {
             model->last_pose_transform_stamp = model->canonical_pose.stamp;
         }
+    }
+
+    void publishHeightProjectionViews(const ros::Time& now) {
+        publishHeightProjectionView(height_projection_pub_, &height_projection_entities_,
+                                     gazebo_sim_visualization::HeightProjectionView::kLocalPosition, now);
+        publishHeightProjectionView(height_projection_ar_pub_, &height_projection_ar_entities_,
+                                     gazebo_sim_visualization::HeightProjectionView::kVrpn, now);
+    }
+
+    void publishHeightProjectionView(const ros::Publisher& publisher,
+                                      std::map<std::string, foxglove_msgs::SceneEntity>* entities,
+                                      gazebo_sim_visualization::HeightProjectionView view, const ros::Time& now) {
+        if (!publisher || entities == nullptr) {
+            return;
+        }
+        foxglove_msgs::SceneUpdate update;
+        bool changed = false;
+        for (auto& entry : models_) {
+            TrackedModel& model = entry.second;
+            if (!model.height_projection_enabled) {
+                continue;
+            }
+            const gazebo_sim_visualization::CanonicalWorldPose pose =
+                gazebo_sim_visualization::selectUavHeightProjectionWorldPose(
+                    view, model.canonical_pose, model.ar_pose, now, canonical_pose_timeout_sec_);
+            auto existing = entities->find(model.name);
+            if (pose.found) {
+                foxglove_msgs::SceneEntity entity = gazebo_sim_visualization::uavHeightProjectionEntity(
+                    model.name, pose.pose.position, pose.stamp, frame_id_, model.height_projection_color);
+                if (existing == entities->end() || existing->second.timestamp != entity.timestamp) {
+                    (*entities)[model.name] = entity;
+                    changed = true;
+                }
+            } else if (existing != entities->end()) {
+                update.deletions.push_back(
+                    gazebo_sim_visualization::uavHeightProjectionDeletion(model.name, now));
+                entities->erase(existing);
+                changed = true;
+            }
+        }
+        if (!changed) {
+            return;
+        }
+        for (const auto& entity : *entities) {
+            update.entities.push_back(entity.second);
+        }
+        publisher.publish(update);
     }
 
     void mavrosStateCallback(const std::string& name, const mavros_msgs::StateConstPtr& msg) {
@@ -745,6 +805,8 @@ class GazeboAutoVisualizer {
             }
         }
 
+        expirePublishedPaths(now);
+
         if (publish_transforms_) {
             const geometry_msgs::TransformStamped root = gazebo_sim_visualization::worldFixedFrameRoot(frame_id_, now);
             if (tf_tree_pub_) {
@@ -798,12 +860,32 @@ class GazeboAutoVisualizer {
         }
     }
 
+    void expirePublishedPaths(const ros::Time& now) {
+        if (!publish_paths_) {
+            return;
+        }
+        expirePublishedPathMap(path_publishers_, now);
+        expirePublishedPathMap(ar_path_publishers_, now);
+    }
+
+    void expirePublishedPathMap(std::map<std::string, PathPublisherRuntime>& publishers, const ros::Time& now) {
+        for (auto& entry : publishers) {
+            PathPublisherRuntime& runtime = entry.second;
+            if (!runtime.history || !runtime.history->expire(now)) {
+                continue;
+            }
+            runtime.publisher.publish(runtime.history->message());
+        }
+    }
+
     ros::NodeHandle nh_;
     ros::NodeHandle private_nh_;
     ros::Publisher marker_pub_;
     ros::Publisher scene_update_pub_;
     ros::Publisher height_projection_pub_;
     std::map<std::string, foxglove_msgs::SceneEntity> height_projection_entities_;
+    ros::Publisher height_projection_ar_pub_;
+    std::map<std::string, foxglove_msgs::SceneEntity> height_projection_ar_entities_;
     ros::Publisher scene_ready_pub_;
     ros::Timer publish_timer_;
     ros::Timer pose_transform_timer_;

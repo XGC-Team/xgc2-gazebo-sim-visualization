@@ -1,5 +1,6 @@
 #include "gazebo_sim_visualization/scene_contract.hpp"
 
+#include <array>
 #include <cmath>
 #include <limits>
 #include <set>
@@ -677,6 +678,82 @@ TEST(UavHeightProjection, UsesWorldVerticalAndHollowGroundRingAtEveryHeight) {
     EXPECT_THROW(uavHeightProjectionEntity("uav5", position, ros::Time(42, 0), "uav5/base_link", color), std::invalid_argument);
     position.z = std::numeric_limits<double>::infinity();
     EXPECT_THROW(uavHeightProjectionEntity("uav5", position, ros::Time(42, 0), "world", color), std::invalid_argument);
+}
+
+TEST(UavHeightProjection, SplitsLocalPositionAndOffsetVrpnWithoutFallback) {
+    CanonicalPoseSample local;
+    local.available = true;
+    local.pose.position.x = 1.0;
+    local.pose.position.y = 2.0;
+    local.pose.position.z = 3.0;
+    local.pose.orientation.w = 1.0;
+    local.stamp = ros::Time(10, 0);
+    local.frame_id = "map";
+
+    CanonicalPoseSample vrpn_raw;
+    vrpn_raw.available = true;
+    vrpn_raw.pose.position.x = 10.0;
+    vrpn_raw.pose.position.y = 20.0;
+    vrpn_raw.pose.position.z = 4.0;
+    vrpn_raw.pose.orientation.w = 1.0;
+    vrpn_raw.stamp = ros::Time(10, 0);
+    vrpn_raw.frame_id = "world";
+    const std::array<double, 3> offset{{5.0, 6.0, 7.0}};
+    CanonicalPoseSample vrpn_offset = vrpn_raw;
+    vrpn_offset.pose = applyExperimentWorldOffsetOnce(vrpn_raw.pose, offset);
+    EXPECT_DOUBLE_EQ(vrpn_offset.pose.position.x, 15.0);
+    EXPECT_DOUBLE_EQ(vrpn_offset.pose.position.y, 26.0);
+    EXPECT_DOUBLE_EQ(vrpn_offset.pose.position.z, 11.0);
+    const geometry_msgs::Pose twice = applyExperimentWorldOffsetOnce(vrpn_offset.pose, offset);
+    EXPECT_DOUBLE_EQ(twice.position.x, 20.0);
+
+    const ros::Time now(10, 200000000);
+    const CanonicalWorldPose three_d = selectUavHeightProjectionWorldPose(
+        HeightProjectionView::kLocalPosition, local, vrpn_offset, now, 0.5);
+    const CanonicalWorldPose ar = selectUavHeightProjectionWorldPose(
+        HeightProjectionView::kVrpn, local, vrpn_offset, now, 0.5);
+    ASSERT_TRUE(three_d.found);
+    ASSERT_TRUE(ar.found);
+    EXPECT_DOUBLE_EQ(three_d.pose.position.x, 1.0);
+    EXPECT_DOUBLE_EQ(three_d.pose.position.z, 3.0);
+    EXPECT_DOUBLE_EQ(ar.pose.position.x, 15.0);
+    EXPECT_DOUBLE_EQ(ar.pose.position.z, 11.0);
+
+    CanonicalPoseSample stale_local = local;
+    stale_local.stamp = ros::Time(9, 0);
+    EXPECT_FALSE(selectUavHeightProjectionWorldPose(HeightProjectionView::kLocalPosition, stale_local, vrpn_offset,
+                                                    now, 0.5)
+                     .found);
+    EXPECT_TRUE(selectUavHeightProjectionWorldPose(HeightProjectionView::kVrpn, stale_local, vrpn_offset, now, 0.5)
+                    .found);
+
+    CanonicalPoseSample missing_vrpn;
+    EXPECT_TRUE(selectUavHeightProjectionWorldPose(HeightProjectionView::kLocalPosition, local, missing_vrpn, now, 0.5)
+                    .found);
+    EXPECT_FALSE(selectUavHeightProjectionWorldPose(HeightProjectionView::kVrpn, local, missing_vrpn, now, 0.5).found);
+
+    const auto color = sceneColorFromHex("#123abc");
+    const auto three_d_entity =
+        uavHeightProjectionEntity("uav5", three_d.pose.position, three_d.stamp, "world", color);
+    const auto ar_entity = uavHeightProjectionEntity("uav5", ar.pose.position, ar.stamp, "world", color);
+    EXPECT_EQ(three_d_entity.id, ar_entity.id);
+    EXPECT_EQ(three_d_entity.id, "uav5/height_projection");
+    ASSERT_EQ(three_d_entity.lines[0].points.size(), 2U);
+    EXPECT_DOUBLE_EQ(three_d_entity.lines[0].points[0].x, 1.0);
+    EXPECT_DOUBLE_EQ(ar_entity.lines[0].points[0].x, 15.0);
+    EXPECT_DOUBLE_EQ(three_d_entity.lines[0].thickness, 0.02);
+    EXPECT_NEAR(std::hypot(ar_entity.triangles[0].points[0].x - 15.0, ar_entity.triangles[0].points[0].y - 26.0),
+                0.18, 1e-12);
+
+    const auto deletion = uavHeightProjectionDeletion("uav5", ros::Time(11, 0));
+    EXPECT_EQ(deletion.type, foxglove_msgs::SceneEntityDeletion::MATCHING_ID);
+    EXPECT_EQ(deletion.id, "uav5/height_projection");
+}
+
+TEST(UavHeightProjection, TopicsAreDistinctPublishers) {
+    EXPECT_STREQ(kUavHeightProjectionTopic, "/xgc/uav_height_projection");
+    EXPECT_STREQ(kUavHeightProjectionArTopic, "/xgc/uav_height_projection_ar");
+    EXPECT_STRNE(kUavHeightProjectionTopic, kUavHeightProjectionArTopic);
 }
 
 } // namespace

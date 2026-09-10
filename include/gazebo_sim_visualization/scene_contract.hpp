@@ -1,12 +1,15 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <set>
 #include <string>
 #include <vector>
 
 #include <foxglove_msgs/Color.h>
+#include <foxglove_msgs/SceneEntityDeletion.h>
 #include <foxglove_msgs/SceneUpdate.h>
+#include <geometry_msgs/Point.h>
 #include <geometry_msgs/Pose.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <ros/time.h>
@@ -45,13 +48,27 @@ struct SceneLabelStyle {
 };
 
 constexpr const char* kUavHeightProjectionTopic = "/xgc/uav_height_projection";
+constexpr const char* kUavHeightProjectionArTopic = "/xgc/uav_height_projection_ar";
+
+enum class HeightProjectionView { kLocalPosition, kVrpn };
 
 foxglove_msgs::Color sceneColorFromHex(const std::string& color);
 
 // Geometry is authored in the fixed world frame; vehicle attitude never enters it.
+// 3D and AR reuse this constructor; each view supplies its own already-final pose.
 foxglove_msgs::SceneEntity uavHeightProjectionEntity(
     const std::string& scene_model, const geometry_msgs::Point& position,
     const ros::Time& stamp, const std::string& frame_id, const foxglove_msgs::Color& color);
+
+foxglove_msgs::SceneEntityDeletion uavHeightProjectionDeletion(const std::string& scene_model,
+                                                               const ros::Time& stamp);
+
+// Experiment world offset is applied once to a VRPN sample. Callers must not
+// add it again in geometry construction.
+geometry_msgs::Point applyExperimentWorldOffsetOnce(geometry_msgs::Point position,
+                                                    const std::array<double, 3>& offset);
+geometry_msgs::Pose applyExperimentWorldOffsetOnce(geometry_msgs::Pose pose,
+                                                    const std::array<double, 3>& offset);
 
 SceneLabelStyle sceneLabelStyleFromMarkerColor(const std::string& marker_color,
                                                bool scale_invariant = false,
@@ -174,6 +191,13 @@ struct CanonicalWorldPose {
 // ground vehicles continue to require world.
 CanonicalWorldPose selectSlotVisualizationWorldPose(RobotModelKind kind, const CanonicalPoseSample& pose,
                                                      const ros::Time& now, double timeout_sec);
+
+// 3D uses fused local_position; AR uses the already-offset VRPN sample. Neither
+// view substitutes the other source when that sample is missing or stale.
+CanonicalWorldPose selectUavHeightProjectionWorldPose(HeightProjectionView view,
+                                                    const CanonicalPoseSample& local_position,
+                                                    const CanonicalPoseSample& vrpn_already_offset,
+                                                    const ros::Time& now, double timeout_sec);
 
 // Identity child of the Fixed Frame published on /tf so RViz's Fixed Frame
 // (the parent) exists in the TF tree. Displays consume the parent, not the child.

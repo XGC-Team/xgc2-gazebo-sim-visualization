@@ -13,7 +13,6 @@
   <arg name="scene_publish_rate" default="10.0"/>
   <arg name="scene_path_publish_rate" default="2.0"/>
   <arg name="path_publish_rate" default="10.0"/>
-  <arg name="path_history_duration" default="60.0"/>
   <arg name="path_limit" default="0"/>
   <arg name="canonical_pose_timeout" default="0.5"/>
   <arg name="mavros_state_timeout" default="2.0"/>
@@ -49,7 +48,6 @@
       <param name="scene_publish_rate" value="$(arg scene_publish_rate)"/>
       <param name="scene_path_publish_rate" value="$(arg scene_path_publish_rate)"/>
       <param name="path_publish_rate" value="$(arg path_publish_rate)"/>
-      <param name="path_history_duration" value="$(arg path_history_duration)"/>
       <param name="path_limit" value="$(arg path_limit)"/>
       <param name="canonical_pose_timeout" value="$(arg canonical_pose_timeout)"/>
       <param name="mavros_state_timeout" value="$(arg mavros_state_timeout)"/>

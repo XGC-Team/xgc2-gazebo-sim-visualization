@@ -1,6 +1,7 @@
 #include "gazebo_sim_visualization/scene_contract.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -13,6 +14,7 @@
 #include <foxglove_msgs/LinePrimitive.h>
 #include <foxglove_msgs/ModelPrimitive.h>
 #include <foxglove_msgs/SceneEntity.h>
+#include <foxglove_msgs/SceneEntityDeletion.h>
 #include <foxglove_msgs/TextPrimitive.h>
 #include <geometry_msgs/Pose.h>
 #include <geometry_msgs/Quaternion.h>
@@ -197,6 +199,32 @@ foxglove_msgs::SceneEntity uavHeightProjectionEntity(
     }
     entity.triangles.push_back(std::move(ring));
     return entity;
+}
+
+foxglove_msgs::SceneEntityDeletion uavHeightProjectionDeletion(const std::string& scene_model,
+                                                               const ros::Time& stamp) {
+    if (!canonicalROSIdentifier(scene_model) || stamp.isZero()) {
+        throw std::invalid_argument("UAV height projection deletion requires identity and timestamp");
+    }
+    foxglove_msgs::SceneEntityDeletion deletion;
+    deletion.timestamp = stamp;
+    deletion.type = foxglove_msgs::SceneEntityDeletion::MATCHING_ID;
+    deletion.id = scene_model + "/height_projection";
+    return deletion;
+}
+
+geometry_msgs::Point applyExperimentWorldOffsetOnce(geometry_msgs::Point position,
+                                                    const std::array<double, 3>& offset) {
+    position.x += offset[0];
+    position.y += offset[1];
+    position.z += offset[2];
+    return position;
+}
+
+geometry_msgs::Pose applyExperimentWorldOffsetOnce(geometry_msgs::Pose pose,
+                                                    const std::array<double, 3>& offset) {
+    pose.position = applyExperimentWorldOffsetOnce(pose.position, offset);
+    return pose;
 }
 
 void validateSceneLabelOffsets(const SceneLabelOffsets& offsets) {
@@ -556,6 +584,20 @@ CanonicalWorldPose selectSlotVisualizationWorldPose(RobotModelKind kind, const C
     selected.stamp = pose.stamp;
     selected.frame_id = "world";
     return selected;
+}
+
+CanonicalWorldPose selectUavHeightProjectionWorldPose(HeightProjectionView view,
+                                                       const CanonicalPoseSample& local_position,
+                                                       const CanonicalPoseSample& vrpn_already_offset,
+                                                       const ros::Time& now, double timeout_sec) {
+    switch (view) {
+        case HeightProjectionView::kLocalPosition:
+            return selectSlotVisualizationWorldPose(RobotModelKind::kFs150, local_position, now, timeout_sec);
+        case HeightProjectionView::kVrpn:
+            return selectSlotVisualizationWorldPose(RobotModelKind::kScout, vrpn_already_offset, now, timeout_sec);
+        default:
+            return CanonicalWorldPose{};
+    }
 }
 
 geometry_msgs::TransformStamped worldFixedFrameRoot(const std::string& frame_id, const ros::Time& stamp) {
