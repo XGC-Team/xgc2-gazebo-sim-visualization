@@ -92,7 +92,7 @@ TEST(SceneContract, ConfiguredLabelStyleAndOffsetsPreserveUprightAnchors) {
             EXPECT_DOUBLE_EQ(transforms[0].transform.rotation.x, pose.orientation.x);
             const auto& anchor = transforms[1];
             EXPECT_EQ(anchor.header.frame_id, "world");
-            EXPECT_EQ(anchor.child_frame_id, std::string(names[i]) + "/label");
+            EXPECT_EQ(anchor.child_frame_id, "xgc/robots/" + std::string(names[i]) + "/label");
             EXPECT_DOUBLE_EQ(anchor.transform.translation.x, 3.0);
             EXPECT_DOUBLE_EQ(anchor.transform.translation.y, -2.0);
             EXPECT_DOUBLE_EQ(anchor.transform.translation.z, 4.0 + heights[i]);
@@ -214,8 +214,8 @@ TEST(SceneContract, CanonicalPosePublishesOnlyBodyAndUprightLabelTransforms) {
     for (const Case& test_case : cases) {
         const auto transforms = canonicalRobotPoseTransforms(test_case.kind, test_case.name, pose, stamp, "world");
         ASSERT_EQ(transforms.size(), 2U);
-        EXPECT_EQ(transforms[0].child_frame_id, std::string(test_case.name) + "/base_link");
-        EXPECT_EQ(transforms[1].child_frame_id, std::string(test_case.name) + "/label");
+        EXPECT_EQ(transforms[0].child_frame_id, "xgc/robots/" + std::string(test_case.name) + "/base_link");
+        EXPECT_EQ(transforms[1].child_frame_id, "xgc/robots/" + std::string(test_case.name) + "/label");
         EXPECT_EQ(transforms[0].header.stamp, stamp);
         EXPECT_DOUBLE_EQ(transforms[0].transform.translation.x, pose.position.x);
         EXPECT_NEAR(transforms[0].transform.rotation.z, std::sqrt(0.5), 1.0e-12);
