@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -172,24 +173,29 @@ foxglove_msgs::SceneEntity uavHeightProjectionEntity(
     vertical.points.push_back(ground);
     entity.lines.push_back(std::move(vertical));
 
-    foxglove_msgs::LinePrimitive ring;
-    ring.type = foxglove_msgs::LinePrimitive::LINE_LOOP;
+    foxglove_msgs::TriangleListPrimitive ring;
     ring.pose.orientation.w = 1.0;
-    ring.thickness = 0.02;
-    ring.scale_invariant = false;
     ring.color = color;
     constexpr std::size_t segments = 48;
-    constexpr double radius = 0.35;
+    constexpr double outer_radius = 0.18;
+    constexpr double inner_radius = 0.13;
     const double two_pi = 2.0 * std::acos(-1.0);
-    ring.points.reserve(segments);
+    ring.points.reserve(segments * 2);
+    ring.indices.reserve(segments * 6);
     for (std::size_t i = 0; i < segments; ++i) {
         const double angle = two_pi * static_cast<double>(i) / segments;
-        geometry_msgs::Point point = ground;
-        point.x += radius * std::cos(angle);
-        point.y += radius * std::sin(angle);
-        ring.points.push_back(point);
+        for (const double radius : {outer_radius, inner_radius}) {
+            geometry_msgs::Point point = ground;
+            point.x += radius * std::cos(angle);
+            point.y += radius * std::sin(angle);
+            ring.points.push_back(point);
+        }
+        const auto outer = static_cast<std::uint32_t>(2 * i);
+        const auto next_outer = static_cast<std::uint32_t>(2 * ((i + 1) % segments));
+        ring.indices.insert(ring.indices.end(), {outer, next_outer, outer + 1,
+                                               outer + 1, next_outer, next_outer + 1});
     }
-    entity.lines.push_back(std::move(ring));
+    entity.triangles.push_back(std::move(ring));
     return entity;
 }
 

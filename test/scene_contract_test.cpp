@@ -628,7 +628,7 @@ TEST(UavHeightProjection, UsesWorldVerticalAndHollowGroundRingAtEveryHeight) {
         EXPECT_EQ(entity.timestamp, ros::Time(42, 0));
         EXPECT_TRUE(entity.texts.empty());
         EXPECT_TRUE(entity.models.empty());
-        ASSERT_EQ(entity.lines.size(), 2U);
+        ASSERT_EQ(entity.lines.size(), 1U);
         const auto& vertical = entity.lines[0];
         EXPECT_EQ(vertical.type, foxglove_msgs::LinePrimitive::LINE_LIST);
         ASSERT_EQ(vertical.points.size(), 2U);
@@ -638,13 +638,31 @@ TEST(UavHeightProjection, UsesWorldVerticalAndHollowGroundRingAtEveryHeight) {
             EXPECT_DOUBLE_EQ(point.x, position.x);
             EXPECT_DOUBLE_EQ(point.y, position.y);
         }
-        const auto& ring = entity.lines[1];
-        EXPECT_EQ(ring.type, foxglove_msgs::LinePrimitive::LINE_LOOP);
-        ASSERT_GE(ring.points.size(), 24U);
-        for (const auto& point : ring.points) {
-            EXPECT_NEAR(std::hypot(point.x - position.x, point.y - position.y), 0.35, 1e-12);
+        ASSERT_EQ(entity.triangles.size(), 1U);
+        const auto& ring = entity.triangles[0];
+        ASSERT_EQ(ring.points.size(), 96U);
+        ASSERT_EQ(ring.indices.size(), 288U);
+        for (std::size_t i = 0; i < ring.points.size(); ++i) {
+            const auto& point = ring.points[i];
+            EXPECT_NEAR(std::hypot(point.x - position.x, point.y - position.y),
+                        i % 2 == 0 ? 0.18 : 0.13, 1e-12);
             EXPECT_DOUBLE_EQ(point.z, 0.0);
         }
+        double area = 0.0;
+        for (std::size_t i = 0; i < ring.indices.size(); i += 3) {
+            const auto& a = ring.points.at(ring.indices[i]);
+            const auto& b = ring.points.at(ring.indices[i + 1]);
+            const auto& c = ring.points.at(ring.indices[i + 2]);
+            const double twice_area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+            EXPECT_GT(twice_area, 0.0);
+            area += twice_area / 2.0;
+            EXPECT_GT(std::hypot((a.x + b.x + c.x) / 3.0 - position.x,
+                                 (a.y + b.y + c.y) / 3.0 - position.y), 0.12);
+        }
+        EXPECT_NEAR(area, std::acos(-1.0) * (0.18 * 0.18 - 0.13 * 0.13), 0.0002);
+        EXPECT_DOUBLE_EQ(ring.pose.orientation.w, 1.0);
+        EXPECT_DOUBLE_EQ(ring.color.r, color.r);
+        EXPECT_DOUBLE_EQ(ring.color.a, 1.0);
         for (const auto& line : entity.lines) {
             EXPECT_DOUBLE_EQ(line.thickness, 0.02);
             EXPECT_FALSE(line.scale_invariant);
