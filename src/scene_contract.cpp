@@ -19,6 +19,7 @@
 #include <std_msgs/ColorRGBA.h>
 #include <visualization_msgs/Marker.h>
 
+#include "xgc2_robot_visualization/path_history.hpp"
 #include "xgc2_robot_visualization/robot_frames.hpp"
 
 namespace gazebo_sim_visualization {
@@ -119,17 +120,85 @@ bool canonicalROSIdentifier(const std::string& value) {
 
 } // namespace
 
-SceneLabelStyle sceneLabelStyleFromMarkerColor(const std::string& marker_color) {
+foxglove_msgs::Color sceneColorFromHex(const std::string& marker_color) {
     if (marker_color.size() != 7U || marker_color.front() != '#') {
         throw std::invalid_argument("marker color must use canonical lowercase #rrggbb syntax");
     }
+    foxglove_msgs::Color color;
+    color.r = hexChannel(marker_color, 1U);
+    color.g = hexChannel(marker_color, 3U);
+    color.b = hexChannel(marker_color, 5U);
+    color.a = 1.0;
+    return color;
+}
+
+SceneLabelStyle sceneLabelStyleFromMarkerColor(const std::string& marker_color,
+                                               bool scale_invariant, double font_size, double opacity) {
+    const double minimum = scale_invariant ? 1.0 : 0.01;
+    const double maximum = scale_invariant ? 256.0 : 10.0;
+    if (!std::isfinite(font_size) || font_size < minimum || font_size > maximum ||
+        !std::isfinite(opacity) || opacity < 0.0 || opacity > 1.0) {
+        throw std::invalid_argument("invalid robot label font size or opacity");
+    }
     SceneLabelStyle style;
-    style.font_size = 0.24;
-    style.color.r = hexChannel(marker_color, 1U);
-    style.color.g = hexChannel(marker_color, 3U);
-    style.color.b = hexChannel(marker_color, 5U);
-    style.color.a = 1.0;
+    style.font_size = font_size;
+    style.scale_invariant = scale_invariant;
+    style.color = sceneColorFromHex(marker_color);
+    style.color.a = opacity;
     return style;
+}
+
+foxglove_msgs::SceneEntity uavHeightProjectionEntity(
+    const std::string& scene_model, const geometry_msgs::Point& position,
+    const ros::Time& stamp, const std::string& frame_id, const foxglove_msgs::Color& color) {
+    if (!canonicalROSIdentifier(scene_model) || !isWorldFixedFrame(frame_id) || stamp.isZero() ||
+        !std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) {
+        throw std::invalid_argument("UAV height projection requires a finite world position and identity");
+    }
+    foxglove_msgs::SceneEntity entity;
+    entity.id = scene_model + "/height_projection";
+    entity.frame_id = frame_id;
+    entity.timestamp = stamp;
+
+    foxglove_msgs::LinePrimitive vertical;
+    vertical.type = foxglove_msgs::LinePrimitive::LINE_LIST;
+    vertical.pose.orientation.w = 1.0;
+    vertical.thickness = 0.02;
+    vertical.scale_invariant = false;
+    vertical.color = color;
+    vertical.points.push_back(position);
+    geometry_msgs::Point ground = position;
+    ground.z = 0.0;
+    vertical.points.push_back(ground);
+    entity.lines.push_back(std::move(vertical));
+
+    foxglove_msgs::LinePrimitive ring;
+    ring.type = foxglove_msgs::LinePrimitive::LINE_LOOP;
+    ring.pose.orientation.w = 1.0;
+    ring.thickness = 0.02;
+    ring.scale_invariant = false;
+    ring.color = color;
+    constexpr std::size_t segments = 48;
+    constexpr double radius = 0.35;
+    const double two_pi = 2.0 * std::acos(-1.0);
+    ring.points.reserve(segments);
+    for (std::size_t i = 0; i < segments; ++i) {
+        const double angle = two_pi * static_cast<double>(i) / segments;
+        geometry_msgs::Point point = ground;
+        point.x += radius * std::cos(angle);
+        point.y += radius * std::sin(angle);
+        ring.points.push_back(point);
+    }
+    entity.lines.push_back(std::move(ring));
+    return entity;
+}
+
+void validateSceneLabelOffsets(const SceneLabelOffsets& offsets) {
+    for (const double value : {offsets.uav, offsets.scout, offsets.mecanum}) {
+        if (!std::isfinite(value) || value < -10.0 || value > 10.0) {
+            throw std::invalid_argument("robot label offsets must be between -10 and 10 meters");
+        }
+    }
 }
 
 std::set<std::string> parseModelNames(const std::string& csv) {
@@ -215,10 +284,18 @@ std::string slotVisualizationPoseTopic(RobotModelKind kind, const std::string& r
                : ros_namespace + "/pose";
 }
 
+geometry_msgs::Pose slotHistoryPathPose(RobotModelKind kind, geometry_msgs::Pose world_pose) {
+    if (kind == RobotModelKind::kScout || kind == RobotModelKind::kMecanum) {
+        return xgc2_robot_visualization::flattenGroundVehicleHistoryPose(world_pose);
+    }
+    return world_pose;
+}
+
 std::vector<geometry_msgs::TransformStamped>
 canonicalRobotPoseTransforms(RobotModelKind kind, const std::string& scene_model,
                              const geometry_msgs::Pose& pose, const ros::Time& stamp,
-                             const std::string& frame_id) {
+                             const std::string& frame_id, const SceneLabelOffsets& offsets) {
+    validateSceneLabelOffsets(offsets);
     if (kind == RobotModelKind::kNone || !canonicalROSIdentifier(scene_model) || !isWorldFixedFrame(frame_id) ||
         stamp.isZero()) {
         throw std::invalid_argument("canonical Robot pose transform identity must be complete");
@@ -227,13 +304,13 @@ canonicalRobotPoseTransforms(RobotModelKind kind, const std::string& scene_model
     double label_height = 0.0;
     switch (kind) {
     case RobotModelKind::kFs150:
-        label_height = 0.55;
+        label_height = offsets.uav;
         break;
     case RobotModelKind::kScout:
-        label_height = 0.65;
+        label_height = offsets.scout;
         break;
     case RobotModelKind::kMecanum:
-        label_height = 0.32;
+        label_height = offsets.mecanum;
         break;
     case RobotModelKind::kNone:
         throw std::invalid_argument("canonical Robot pose transform requires a concrete kind");
@@ -421,7 +498,7 @@ void appendSceneEntityImpl(RobotModelKind kind, const std::string& entity_id,
             primitive.pose = copyPose(marker.pose);
             primitive.billboard = true;
             primitive.font_size = label_style.font_size;
-            primitive.scale_invariant = false;
+            primitive.scale_invariant = label_style.scale_invariant;
             primitive.color = label_style.color;
             primitive.text = marker.text;
             entity.texts.push_back(std::move(primitive));

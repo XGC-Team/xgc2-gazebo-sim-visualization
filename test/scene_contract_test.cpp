@@ -1,6 +1,7 @@
 #include "gazebo_sim_visualization/scene_contract.hpp"
 
 #include <cmath>
+#include <limits>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -69,6 +70,69 @@ TEST(SceneContract, FS150ScoutAndMecanumLabelsUseOneSceneStyle) {
         EXPECT_TRUE(text.billboard);
         EXPECT_FALSE(text.scale_invariant);
     }
+}
+
+TEST(SceneContract, ConfiguredLabelStyleAndOffsetsPreserveUprightAnchors) {
+    const RobotModelKind kinds[] = {RobotModelKind::kFs150, RobotModelKind::kScout, RobotModelKind::kMecanum};
+    const char* names[] = {"uav1", "ugv1", "ugv2"};
+    const SceneLabelOffsets offsets{1.2, 0.0, -0.4};
+    const double heights[] = {1.2, 0.0, -0.4};
+    geometry_msgs::Pose pose;
+    pose.position.x = 3.0;
+    pose.position.y = -2.0;
+    pose.position.z = 4.0;
+    pose.orientation.x = std::sin(0.7);
+    pose.orientation.w = std::cos(0.7);
+    for (const bool fixed : {false, true}) {
+        const auto style = sceneLabelStyleFromMarkerColor("#123456", fixed, fixed ? 28.0 : 0.4, 0.35);
+        for (std::size_t i = 0; i < 3; ++i) {
+            const auto transforms = canonicalRobotPoseTransforms(kinds[i], names[i], pose, ros::Time(42), "world", offsets);
+            ASSERT_EQ(transforms.size(), 2U);
+            EXPECT_DOUBLE_EQ(transforms[0].transform.translation.z, 4.0);
+            EXPECT_DOUBLE_EQ(transforms[0].transform.rotation.x, pose.orientation.x);
+            const auto& anchor = transforms[1];
+            EXPECT_EQ(anchor.header.frame_id, "world");
+            EXPECT_EQ(anchor.child_frame_id, std::string(names[i]) + "/label");
+            EXPECT_DOUBLE_EQ(anchor.transform.translation.x, 3.0);
+            EXPECT_DOUBLE_EQ(anchor.transform.translation.y, -2.0);
+            EXPECT_DOUBLE_EQ(anchor.transform.translation.z, 4.0 + heights[i]);
+            EXPECT_DOUBLE_EQ(anchor.transform.rotation.x, 0.0);
+            EXPECT_DOUBLE_EQ(anchor.transform.rotation.y, 0.0);
+            EXPECT_DOUBLE_EQ(anchor.transform.rotation.z, 0.0);
+            EXPECT_DOUBLE_EQ(anchor.transform.rotation.w, 1.0);
+            visualization_msgs::MarkerArray markers;
+            visualization_msgs::Marker label;
+            label.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+            label.header.frame_id = anchor.child_frame_id;
+            label.pose.orientation.w = 1.0;
+            label.text = "identity";
+            markers.markers.push_back(label);
+            foxglove_msgs::SceneUpdate update;
+            appendSceneEntityPart(kinds[i], names[i], SceneEntityPart::kLabel, markers, 0U, ros::Time(42), "world", style, &update);
+            ASSERT_EQ(update.entities.size(), 1U);
+            EXPECT_EQ(update.entities[0].frame_id, anchor.child_frame_id);
+            ASSERT_EQ(update.entities[0].texts.size(), 1U);
+            const auto& text = update.entities[0].texts[0];
+            EXPECT_EQ(text.text, "identity");
+            EXPECT_EQ(text.scale_invariant, fixed);
+            EXPECT_DOUBLE_EQ(text.font_size, fixed ? 28.0 : 0.4);
+            EXPECT_DOUBLE_EQ(text.color.a, 0.35);
+            EXPECT_DOUBLE_EQ(text.pose.position.x, 0.0);
+            EXPECT_DOUBLE_EQ(text.pose.position.y, 0.0);
+            EXPECT_DOUBLE_EQ(text.pose.position.z, 0.0);
+        }
+    }
+}
+
+TEST(SceneContract, LabelStyleRejectsInvalidUnitsAndAllowsZeroOpacity) {
+    EXPECT_DOUBLE_EQ(sceneLabelStyleFromMarkerColor("#ffbf00", true, 16.0, 0.0).color.a, 0.0);
+    EXPECT_THROW(sceneLabelStyleFromMarkerColor("#ffbf00", true, 0.24, 1.0), std::invalid_argument);
+    EXPECT_THROW(sceneLabelStyleFromMarkerColor("#ffbf00", false, 16.0, 1.0), std::invalid_argument);
+    EXPECT_THROW(sceneLabelStyleFromMarkerColor("#ffbf00", false, 0.24, -0.1), std::invalid_argument);
+    EXPECT_THROW(sceneLabelStyleFromMarkerColor("#ffbf00", false, 0.24, 1.1), std::invalid_argument);
+    EXPECT_THROW(sceneLabelStyleFromMarkerColor("#ffbf00", false, std::numeric_limits<double>::quiet_NaN(), 1.0), std::invalid_argument);
+    const SceneLabelOffsets invalid{0.55, 0.65, std::numeric_limits<double>::infinity()};
+    EXPECT_THROW(validateSceneLabelOffsets(invalid), std::invalid_argument);
 }
 
 TEST(SceneContract, ImmutableListsSelectOnlyConfiguredModels) {
@@ -516,6 +580,18 @@ TEST(CanonicalWorldPose, AcceptsOnlyTheKindSpecificSlotViewerSample) {
     EXPECT_THROW(slotVisualizationPoseTopic(RobotModelKind::kNone, "/uav7"), std::invalid_argument);
     EXPECT_THROW(slotVisualizationPoseTopic(RobotModelKind::kFs150, "uav7"), std::invalid_argument);
     EXPECT_THROW(slotVisualizationPoseTopic(RobotModelKind::kScout, "/uav7/extra"), std::invalid_argument);
+
+    geometry_msgs::Pose elevated;
+    elevated.position.x = 2.0;
+    elevated.position.z = 0.41;
+    elevated.orientation.w = 1.0;
+    const geometry_msgs::Pose scout_path = slotHistoryPathPose(RobotModelKind::kScout, elevated);
+    EXPECT_DOUBLE_EQ(scout_path.position.x, 2.0);
+    EXPECT_DOUBLE_EQ(scout_path.position.z, 0.0);
+    const geometry_msgs::Pose mecanum_path = slotHistoryPathPose(RobotModelKind::kMecanum, elevated);
+    EXPECT_DOUBLE_EQ(mecanum_path.position.z, 0.0);
+    const geometry_msgs::Pose uav_path = slotHistoryPathPose(RobotModelKind::kFs150, elevated);
+    EXPECT_DOUBLE_EQ(uav_path.position.z, 0.41);
 }
 
 TEST(WorldFixedFrameRoot, AdvertisesParentOnTfWithoutMovingDisplays) {
@@ -537,6 +613,52 @@ TEST(FrozenVisualizationRosterReady, AllowsMissingSiblingPoses) {
     EXPECT_TRUE(frozenVisualizationRosterReady(4U, 3U));
     EXPECT_TRUE(frozenVisualizationRosterReady(4U, 4U));
     EXPECT_FALSE(frozenVisualizationRosterReady(4U, 5U));
+}
+
+TEST(UavHeightProjection, UsesWorldVerticalAndHollowGroundRingAtEveryHeight) {
+    geometry_msgs::Point position;
+    position.x = 4.5;
+    position.y = -2.0;
+    const auto color = sceneColorFromHex("#123abc");
+    for (const double height : {3.0, 0.0, -0.5}) {
+        position.z = height;
+        const auto entity = uavHeightProjectionEntity("uav5", position, ros::Time(42, 0), "world", color);
+        EXPECT_EQ(entity.id, "uav5/height_projection");
+        EXPECT_EQ(entity.frame_id, "world");
+        EXPECT_EQ(entity.timestamp, ros::Time(42, 0));
+        EXPECT_TRUE(entity.texts.empty());
+        EXPECT_TRUE(entity.models.empty());
+        ASSERT_EQ(entity.lines.size(), 2U);
+        const auto& vertical = entity.lines[0];
+        EXPECT_EQ(vertical.type, foxglove_msgs::LinePrimitive::LINE_LIST);
+        ASSERT_EQ(vertical.points.size(), 2U);
+        EXPECT_DOUBLE_EQ(vertical.points[0].z, height);
+        EXPECT_DOUBLE_EQ(vertical.points[1].z, 0.0);
+        for (const auto& point : vertical.points) {
+            EXPECT_DOUBLE_EQ(point.x, position.x);
+            EXPECT_DOUBLE_EQ(point.y, position.y);
+        }
+        const auto& ring = entity.lines[1];
+        EXPECT_EQ(ring.type, foxglove_msgs::LinePrimitive::LINE_LOOP);
+        ASSERT_GE(ring.points.size(), 24U);
+        for (const auto& point : ring.points) {
+            EXPECT_NEAR(std::hypot(point.x - position.x, point.y - position.y), 0.35, 1e-12);
+            EXPECT_DOUBLE_EQ(point.z, 0.0);
+        }
+        for (const auto& line : entity.lines) {
+            EXPECT_DOUBLE_EQ(line.thickness, 0.02);
+            EXPECT_FALSE(line.scale_invariant);
+            EXPECT_DOUBLE_EQ(line.pose.orientation.w, 1.0);
+            EXPECT_DOUBLE_EQ(line.pose.position.z, 0.0);
+            EXPECT_DOUBLE_EQ(line.color.r, 0x12 / 255.0);
+            EXPECT_DOUBLE_EQ(line.color.g, 0x3a / 255.0);
+            EXPECT_DOUBLE_EQ(line.color.b, 0xbc / 255.0);
+            EXPECT_DOUBLE_EQ(line.color.a, 1.0);
+        }
+    }
+    EXPECT_THROW(uavHeightProjectionEntity("uav5", position, ros::Time(42, 0), "uav5/base_link", color), std::invalid_argument);
+    position.z = std::numeric_limits<double>::infinity();
+    EXPECT_THROW(uavHeightProjectionEntity("uav5", position, ros::Time(42, 0), "world", color), std::invalid_argument);
 }
 
 } // namespace

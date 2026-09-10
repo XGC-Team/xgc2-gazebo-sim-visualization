@@ -40,10 +40,30 @@ struct SceneUpdateCadenceDecision {
 
 struct SceneLabelStyle {
     double font_size{0.0};
+    bool scale_invariant{false};
     foxglove_msgs::Color color;
 };
 
-SceneLabelStyle sceneLabelStyleFromMarkerColor(const std::string& marker_color);
+constexpr const char* kUavHeightProjectionTopic = "/xgc/uav_height_projection";
+
+foxglove_msgs::Color sceneColorFromHex(const std::string& color);
+
+// Geometry is authored in the fixed world frame; vehicle attitude never enters it.
+foxglove_msgs::SceneEntity uavHeightProjectionEntity(
+    const std::string& scene_model, const geometry_msgs::Point& position,
+    const ros::Time& stamp, const std::string& frame_id, const foxglove_msgs::Color& color);
+
+SceneLabelStyle sceneLabelStyleFromMarkerColor(const std::string& marker_color,
+                                               bool scale_invariant = false,
+                                               double font_size = 0.24, double opacity = 1.0);
+
+struct SceneLabelOffsets {
+    double uav{0.55};
+    double scout{0.65};
+    double mecanum{0.32};
+};
+
+void validateSceneLabelOffsets(const SceneLabelOffsets& offsets);
 
 // PublishCadence is one rate gate. It exists so a publisher can give each kind
 // of fact its own cadence -- a pose, a path trail and a rotor animation are not
@@ -95,13 +115,18 @@ std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name
 // robots follow the offset-corrected canonical slot pose.
 std::string slotVisualizationPoseTopic(RobotModelKind kind, const std::string& ros_namespace);
 
+// History `/<slot>/path` sample for the viewer. Scout/Mecanum force world z to
+// 0 so mocap marker height does not float the trail; FS150 keeps fused z.
+// Body TF is unchanged.
+geometry_msgs::Pose slotHistoryPathPose(RobotModelKind kind, geometry_msgs::Pose world_pose);
+
 // Convert one corrected canonical Robot pose into the only high-rate viewer
 // facts: the body transform and its upright overhead label anchor. Meshes and
 // label text stay static; rotor/wheel joints use their own bounded cadence.
 std::vector<geometry_msgs::TransformStamped>
 canonicalRobotPoseTransforms(RobotModelKind kind, const std::string& scene_model,
                              const geometry_msgs::Pose& pose, const ros::Time& stamp,
-                             const std::string& frame_id);
+                             const std::string& frame_id, const SceneLabelOffsets& offsets = {});
 
 // Replace only the operator-facing text generated for one Robot. The concrete
 // robot kind owns the class word (FS150 -> UAV, Scout/Mecanum -> UGV), while

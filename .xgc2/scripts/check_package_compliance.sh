@@ -47,11 +47,11 @@ grep -Fq 'copy_required_path "${PREFIX_ROOT}/lib/libgazebo_scene_contract.so"' \
   .xgc2/scripts/package_debs.sh
 grep -Fq 'test -f "${SCENE_CONTRACT_LIBRARY}"' \
   .xgc2/scripts/check_installed_packages.sh
-grep -Fq 'ros-noetic-xgc2-robot-visualization (>= 0.2.0-6)' \
+grep -Fq 'ros-noetic-xgc2-robot-visualization (>= 0.2.0-7)' \
   .xgc2/scripts/package_debs.sh
-grep -Fq -- '- ros-noetic-xgc2-robot-visualization (>= 0.2.0-6)' \
+grep -Fq -- '- ros-noetic-xgc2-robot-visualization (>= 0.2.0-7)' \
   .xgc2/product.yml
-grep -Fq 'XGC2_ROBOT_VISUALIZATION_MINIMUM_VERSION="0.2.0-6"' \
+grep -Fq 'XGC2_ROBOT_VISUALIZATION_MINIMUM_VERSION="0.2.0-7"' \
   .xgc2/dependencies/xgc2-robot-visualization.env
 grep -Eq '^XGC2_ROBOT_VISUALIZATION_STANDALONE_SOURCE_REF="[0-9a-f]{40}"$' \
   .xgc2/dependencies/xgc2-robot-visualization.env
