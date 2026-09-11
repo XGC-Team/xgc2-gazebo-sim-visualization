@@ -245,6 +245,9 @@ class GazeboAutoVisualizer {
             height_projection_ar_pub_ = nh_.advertise<foxglove_msgs::SceneUpdate>(
                 gazebo_sim_visualization::kUavHeightProjectionArTopic, 1, true);
             publishSceneReset(height_projection_ar_pub_);
+            scene_ar_pub_ = nh_.advertise<foxglove_msgs::SceneUpdate>(
+                gazebo_sim_visualization::kIdentityArTopic, 1, true);
+            publishSceneReset(scene_ar_pub_);
         }
         joint_transform_cadence_.reset(new gazebo_sim_visualization::PublishCadence(joint_transform_publish_rate_));
 
@@ -286,6 +289,7 @@ class GazeboAutoVisualizer {
         gazebo_sim_visualization::CanonicalPoseSample ar_pose;
         std::array<double, 3> world_offset{{0.0, 0.0, 0.0}};
         ros::Time last_pose_transform_stamp;
+        ros::Time last_ar_label_transform_stamp;
         bool height_projection_enabled{false};
         foxglove_msgs::Color height_projection_color;
         bool has_mavros_state{false};
@@ -536,26 +540,72 @@ class GazeboAutoVisualizer {
     void publishPoseTransformsCallback(const ros::TimerEvent&) {
         const ros::Time now = ros::Time::now();
         publishHeightProjectionViews(now);
+        publishArIdentityLabels(now);
         tf2_msgs::TFMessage message;
-        std::vector<TrackedModel*> published;
         for (auto& entry : models_) {
             TrackedModel& model = entry.second;
             const gazebo_sim_visualization::CanonicalWorldPose pose = selectWorldPose(model, now);
-            if (!pose.found || pose.stamp == model.last_pose_transform_stamp) {
-                continue;
+            if (pose.found && pose.stamp != model.last_pose_transform_stamp) {
+                const auto transforms = gazebo_sim_visualization::canonicalRobotPoseTransforms(
+                    model.kind, model.name, pose.pose, pose.stamp, frame_id_, scene_label_offsets_);
+                message.transforms.insert(message.transforms.end(), transforms.begin(), transforms.end());
+                model.last_pose_transform_stamp = pose.stamp;
             }
-            const auto transforms = gazebo_sim_visualization::canonicalRobotPoseTransforms(
-                model.kind, model.name, pose.pose, pose.stamp, frame_id_, scene_label_offsets_);
-            message.transforms.insert(message.transforms.end(), transforms.begin(), transforms.end());
-            published.push_back(&model);
+            const gazebo_sim_visualization::CanonicalWorldPose ar_pose =
+                gazebo_sim_visualization::selectArIdentityWorldPose(
+                    model.kind, model.canonical_pose, model.ar_pose, now, canonical_pose_timeout_sec_);
+            if (ar_pose.found && ar_pose.stamp != model.last_ar_label_transform_stamp) {
+                message.transforms.push_back(gazebo_sim_visualization::canonicalArIdentityLabelTransform(
+                    model.kind, model.name, ar_pose.pose, ar_pose.stamp, frame_id_, scene_label_offsets_));
+                model.last_ar_label_transform_stamp = ar_pose.stamp;
+            }
         }
         if (message.transforms.empty()) {
             return;
         }
         transform_pub_.publish(message);
-        for (TrackedModel* model : published) {
-            model->last_pose_transform_stamp = model->canonical_pose.stamp;
+    }
+
+    void publishArIdentityLabels(const ros::Time& now) {
+        if (!scene_ar_pub_) {
+            return;
         }
+        bool changed = false;
+        for (auto& entry : models_) {
+            TrackedModel& model = entry.second;
+            if (model.slot_name.empty() || model.ros_namespace.empty() ||
+                ar_identity_entities_.count(model.name) != 0U) {
+                continue;
+            }
+            const gazebo_sim_visualization::CanonicalWorldPose pose =
+                gazebo_sim_visualization::selectArIdentityWorldPose(
+                    model.kind, model.canonical_pose, model.ar_pose, now, canonical_pose_timeout_sec_);
+            if (!pose.found) {
+                continue;
+            }
+            visualization_msgs::MarkerArray markers;
+            markers.markers.push_back(gazebo_sim_visualization::identityLabelMarker(
+                model.name, xgc2_robot_visualization::robotFramePrefix(model.name) + "/label_ar",
+                pose.stamp));
+            gazebo_sim_visualization::applyRobotMarkerLabel(&markers, 0U, model.kind, model.ros_namespace);
+            foxglove_msgs::SceneUpdate one;
+            gazebo_sim_visualization::appendSceneEntityPart(
+                model.kind, model.slot_name, gazebo_sim_visualization::SceneEntityPart::kArLabel, markers, 0U,
+                pose.stamp, frame_id_, scene_label_style_, &one);
+            if (one.entities.empty()) {
+                continue;
+            }
+            ar_identity_entities_[model.name] = one.entities.front();
+            changed = true;
+        }
+        if (!changed) {
+            return;
+        }
+        foxglove_msgs::SceneUpdate update;
+        for (const auto& entity : ar_identity_entities_) {
+            update.entities.push_back(entity.second);
+        }
+        scene_ar_pub_.publish(update);
     }
 
     void publishHeightProjectionViews(const ros::Time& now) {
@@ -893,6 +943,8 @@ class GazeboAutoVisualizer {
     std::map<std::string, foxglove_msgs::SceneEntity> height_projection_entities_;
     ros::Publisher height_projection_ar_pub_;
     std::map<std::string, foxglove_msgs::SceneEntity> height_projection_ar_entities_;
+    ros::Publisher scene_ar_pub_;
+    std::map<std::string, foxglove_msgs::SceneEntity> ar_identity_entities_;
     ros::Publisher scene_ready_pub_;
     ros::Timer publish_timer_;
     ros::Timer pose_transform_timer_;

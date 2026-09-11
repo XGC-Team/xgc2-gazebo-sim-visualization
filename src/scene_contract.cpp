@@ -299,7 +299,15 @@ std::string sceneEntityID(RobotModelKind kind, const std::string& model_name) {
 
 std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name, SceneEntityPart part) {
     const std::string robot_id = sceneEntityID(kind, model_name);
-    return part == SceneEntityPart::kPath ? robot_id + "/path" : robot_id + "/label";
+    switch (part) {
+    case SceneEntityPart::kPath:
+        return robot_id + "/path";
+    case SceneEntityPart::kArLabel:
+        return robot_id + "/label_ar";
+    case SceneEntityPart::kLabel:
+        return robot_id + "/label";
+    }
+    throw std::invalid_argument("scene entity part is unknown");
 }
 
 std::string slotVisualizationPoseTopic(RobotModelKind kind, const std::string& ros_namespace) {
@@ -367,6 +375,61 @@ canonicalRobotPoseTransforms(RobotModelKind kind, const std::string& scene_model
     label.transform.translation.z = pose.position.z + label_height;
     label.transform.rotation.w = 1.0;
     return {body, label};
+}
+
+double identityLabelHeight(RobotModelKind kind, const SceneLabelOffsets& offsets) {
+    switch (kind) {
+    case RobotModelKind::kFs150:
+        return offsets.uav;
+    case RobotModelKind::kScout:
+        return offsets.scout;
+    case RobotModelKind::kMecanum:
+        return offsets.mecanum;
+    case RobotModelKind::kNone:
+        break;
+    }
+    throw std::invalid_argument("identity label height requires a concrete kind");
+}
+
+geometry_msgs::TransformStamped canonicalArIdentityLabelTransform(
+    RobotModelKind kind, const std::string& scene_model, const geometry_msgs::Pose& pose, const ros::Time& stamp,
+    const std::string& frame_id, const SceneLabelOffsets& offsets) {
+    validateSceneLabelOffsets(offsets);
+    if (kind == RobotModelKind::kNone || !canonicalROSIdentifier(scene_model) || !isWorldFixedFrame(frame_id) ||
+        stamp.isZero()) {
+        throw std::invalid_argument("AR identity label transform identity must be complete");
+    }
+    geometry_msgs::TransformStamped label;
+    label.header.stamp = stamp;
+    label.header.frame_id = frame_id;
+    label.child_frame_id = xgc2_robot_visualization::robotFramePrefix(scene_model) + "/label_ar";
+    label.transform.translation.x = pose.position.x;
+    label.transform.translation.y = pose.position.y;
+    label.transform.translation.z = pose.position.z + identityLabelHeight(kind, offsets);
+    label.transform.rotation.w = 1.0;
+    return label;
+}
+
+visualization_msgs::Marker identityLabelMarker(const std::string& scene_model, const std::string& label_frame,
+                                                 const ros::Time& stamp) {
+    if (!canonicalROSIdentifier(scene_model) || label_frame.empty() || stamp.isZero()) {
+        throw std::invalid_argument("identity label marker requires a scene model, frame, and stamp");
+    }
+    visualization_msgs::Marker marker;
+    marker.header.stamp = stamp;
+    marker.header.frame_id = label_frame;
+    marker.ns = scene_model + "_label";
+    marker.id = 11;
+    marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.orientation.w = 1.0;
+    marker.scale.z = 0.32;
+    marker.color.r = 1.0;
+    marker.color.g = 1.0;
+    marker.color.b = 1.0;
+    marker.color.a = 1.0;
+    marker.text = scene_model;
+    return marker;
 }
 
 void applyRobotMarkerLabel(visualization_msgs::MarkerArray* markers, std::size_t first_marker, RobotModelKind kind,
@@ -468,7 +531,7 @@ bool markerBelongsToPart(const visualization_msgs::Marker& marker, SceneEntityPa
 // label frame and asks the viewer to follow it. Every other part is drawn in
 // world coordinates exactly where the message placed it.
 bool partFollowsItsFrame(const SceneEntityPart* part) {
-    return part != nullptr && *part == SceneEntityPart::kLabel;
+    return part != nullptr && (*part == SceneEntityPart::kLabel || *part == SceneEntityPart::kArLabel);
 }
 
 void appendSceneEntityImpl(RobotModelKind kind, const std::string& entity_id,
@@ -598,6 +661,16 @@ CanonicalWorldPose selectUavHeightProjectionWorldPose(HeightProjectionView view,
         default:
             return CanonicalWorldPose{};
     }
+}
+
+CanonicalWorldPose selectArIdentityWorldPose(RobotModelKind kind, const CanonicalPoseSample& canonical,
+                                               const CanonicalPoseSample& vrpn_already_offset, const ros::Time& now,
+                                               double timeout_sec) {
+    if (kind == RobotModelKind::kFs150) {
+        return selectUavHeightProjectionWorldPose(HeightProjectionView::kVrpn, canonical, vrpn_already_offset, now,
+                                                     timeout_sec);
+    }
+    return selectSlotVisualizationWorldPose(kind, canonical, now, timeout_sec);
 }
 
 geometry_msgs::TransformStamped worldFixedFrameRoot(const std::string& frame_id, const ros::Time& stamp) {

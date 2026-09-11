@@ -13,6 +13,7 @@
 #include <geometry_msgs/Pose.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <ros/time.h>
+#include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 
 namespace gazebo_sim_visualization {
@@ -34,7 +35,7 @@ enum class RobotModelKind { kNone, kFs150, kScout, kMecanum };
 // and places from transforms -- so shipping it again, in world coordinates, at
 // the scene cadence, drew each vehicle twice: once smoothly from the
 // description and once two-per-second on top of it.
-enum class SceneEntityPart { kPath, kLabel };
+enum class SceneEntityPart { kPath, kLabel, kArLabel };
 
 struct SceneUpdateCadenceDecision {
     bool publish_label{false};
@@ -49,6 +50,7 @@ struct SceneLabelStyle {
 
 constexpr const char* kUavHeightProjectionTopic = "/xgc/uav_height_projection";
 constexpr const char* kUavHeightProjectionArTopic = "/xgc/uav_height_projection_ar";
+constexpr const char* kIdentityArTopic = "/xgc/scene_ar";
 
 enum class HeightProjectionView { kLocalPosition, kVrpn };
 
@@ -145,6 +147,16 @@ canonicalRobotPoseTransforms(RobotModelKind kind, const std::string& scene_model
                              const geometry_msgs::Pose& pose, const ros::Time& stamp,
                              const std::string& frame_id, const SceneLabelOffsets& offsets = {});
 
+// Upright image-pane label anchor. Pose must already be the AR identity sample
+// (offset VRPN for FS150, canonical `/pose` for ground robots). Does not
+// publish a second body; physical AR does not overlay URDF.
+geometry_msgs::TransformStamped canonicalArIdentityLabelTransform(
+    RobotModelKind kind, const std::string& scene_model, const geometry_msgs::Pose& pose,
+    const ros::Time& stamp, const std::string& frame_id, const SceneLabelOffsets& offsets = {});
+
+visualization_msgs::Marker identityLabelMarker(const std::string& scene_model, const std::string& label_frame,
+                                                 const ros::Time& stamp);
+
 // Replace only the operator-facing text generated for one Robot. The concrete
 // robot kind owns the class word (FS150 -> UAV, Scout/Mecanum -> UGV), while
 // the canonical lowercase /uavN or /ugvN namespace owns N. This also keeps a
@@ -198,6 +210,13 @@ CanonicalWorldPose selectUavHeightProjectionWorldPose(HeightProjectionView view,
                                                     const CanonicalPoseSample& local_position,
                                                     const CanonicalPoseSample& vrpn_already_offset,
                                                     const ros::Time& now, double timeout_sec);
+
+// Image-pane identity: FS150 uses already-offset VRPN; Scout/Mecanum use the
+// same canonical `/pose` as 3D. Missing/stale samples are skipped, never
+// replaced with fused local_position.
+CanonicalWorldPose selectArIdentityWorldPose(RobotModelKind kind, const CanonicalPoseSample& canonical,
+                                               const CanonicalPoseSample& vrpn_already_offset,
+                                               const ros::Time& now, double timeout_sec);
 
 // Identity child of the Fixed Frame published on /tf so RViz's Fixed Frame
 // (the parent) exists in the TF tree. Displays consume the parent, not the child.

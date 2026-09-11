@@ -1,4 +1,5 @@
 #include "gazebo_sim_visualization/scene_contract.hpp"
+#include "xgc2_robot_visualization/robot_frames.hpp"
 
 #include <array>
 #include <cmath>
@@ -11,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <ros/serialization.h>
 #include <visualization_msgs/Marker.h>
+#include <visualization_msgs/MarkerArray.h>
 
 namespace gazebo_sim_visualization {
 namespace {
@@ -488,6 +490,8 @@ TEST(SceneContract, EntityIDsRemainKindScoped) {
     EXPECT_EQ(sceneEntityID(RobotModelKind::kScout, "ugv1"), "xgc2/scout/ugv1");
     EXPECT_EQ(sceneEntityID(RobotModelKind::kMecanum, "ugv1"), "xgc2/mecanum/ugv1");
     EXPECT_EQ(sceneEntityPartID(RobotModelKind::kFs150, "uav1", SceneEntityPart::kPath), "xgc2/px4/uav1/path");
+    EXPECT_EQ(sceneEntityPartID(RobotModelKind::kFs150, "uav1", SceneEntityPart::kLabel), "xgc2/px4/uav1/label");
+    EXPECT_EQ(sceneEntityPartID(RobotModelKind::kFs150, "uav1", SceneEntityPart::kArLabel), "xgc2/px4/uav1/label_ar");
     EXPECT_EQ(sceneEntityPartID(RobotModelKind::kScout, "ugv1", SceneEntityPart::kPath), "xgc2/scout/ugv1/path");
     EXPECT_EQ(sceneEntityPartID(RobotModelKind::kMecanum, "ugv1", SceneEntityPart::kPath), "xgc2/mecanum/ugv1/path");
     EXPECT_THROW(sceneEntityID(RobotModelKind::kNone, "unknown"), std::invalid_argument);
@@ -769,6 +773,95 @@ TEST(UavHeightProjection, TopicsAreDistinctPublishers) {
     EXPECT_STREQ(kUavHeightProjectionTopic, "/xgc/uav_height_projection");
     EXPECT_STREQ(kUavHeightProjectionArTopic, "/xgc/uav_height_projection_ar");
     EXPECT_STRNE(kUavHeightProjectionTopic, kUavHeightProjectionArTopic);
+}
+
+TEST(ArIdentity, ImagePaneUsesOffsetVrpnAndIgnoresFusedLocal) {
+    CanonicalPoseSample local;
+    local.available = true;
+    local.pose.position.x = 1.0;
+    local.pose.position.y = 2.0;
+    local.pose.position.z = 3.0;
+    local.pose.orientation.w = 1.0;
+    local.stamp = ros::Time(10, 0);
+    local.frame_id = "map";
+
+    CanonicalPoseSample vrpn;
+    vrpn.available = true;
+    vrpn.pose.position.x = 15.0;
+    vrpn.pose.position.y = 26.0;
+    vrpn.pose.position.z = 11.0;
+    vrpn.pose.orientation.w = 1.0;
+    vrpn.stamp = ros::Time(10, 0);
+    vrpn.frame_id = "world";
+
+    const ros::Time now(10, 200000000);
+    const CanonicalWorldPose uav_ar =
+        selectArIdentityWorldPose(RobotModelKind::kFs150, local, vrpn, now, 0.5);
+    ASSERT_TRUE(uav_ar.found);
+    EXPECT_DOUBLE_EQ(uav_ar.pose.position.x, 15.0);
+    EXPECT_DOUBLE_EQ(uav_ar.pose.position.z, 11.0);
+
+    CanonicalPoseSample missing_vrpn;
+    EXPECT_FALSE(selectArIdentityWorldPose(RobotModelKind::kFs150, local, missing_vrpn, now, 0.5).found);
+
+    CanonicalPoseSample ugv;
+    ugv.available = true;
+    ugv.pose.position.x = 4.0;
+    ugv.pose.position.y = 5.0;
+    ugv.pose.position.z = 0.2;
+    ugv.pose.orientation.w = 1.0;
+    ugv.stamp = ros::Time(10, 0);
+    ugv.frame_id = "world";
+    const CanonicalWorldPose scout_ar =
+        selectArIdentityWorldPose(RobotModelKind::kScout, ugv, missing_vrpn, now, 0.5);
+    ASSERT_TRUE(scout_ar.found);
+    EXPECT_DOUBLE_EQ(scout_ar.pose.position.x, 4.0);
+}
+
+TEST(ArIdentity, LabelArFrameIsUprightSeparateFromFusedLabel) {
+    using xgc2_robot_visualization::robotFramePrefix;
+    using xgc2_robot_visualization::robotLabelFrame;
+    const std::string label_ar = robotFramePrefix("uav1") + "/label_ar";
+    EXPECT_NE(robotLabelFrame("uav1"), label_ar);
+
+    geometry_msgs::Pose pose;
+    pose.position.x = 4.0;
+    pose.position.y = -2.5;
+    pose.position.z = 12.0;
+    pose.orientation.z = 0.5;
+    pose.orientation.w = 0.5;
+    const SceneLabelOffsets offsets{0.55, 0.65, 0.32};
+    const auto three_d = canonicalRobotPoseTransforms(RobotModelKind::kFs150, "uav1", pose, ros::Time(7, 0), "world",
+                                                      offsets);
+    const auto ar = canonicalArIdentityLabelTransform(RobotModelKind::kFs150, "uav1", pose, ros::Time(7, 0),
+                                                          "world", offsets);
+    ASSERT_EQ(three_d.size(), 2U);
+    EXPECT_EQ(three_d[1].child_frame_id, robotLabelFrame("uav1"));
+    EXPECT_EQ(ar.child_frame_id, label_ar);
+    EXPECT_EQ(ar.header.frame_id, "world");
+    EXPECT_DOUBLE_EQ(ar.transform.translation.z, 12.55);
+    EXPECT_DOUBLE_EQ(ar.transform.rotation.x, 0.0);
+    EXPECT_DOUBLE_EQ(ar.transform.rotation.y, 0.0);
+    EXPECT_DOUBLE_EQ(ar.transform.rotation.z, 0.0);
+    EXPECT_DOUBLE_EQ(ar.transform.rotation.w, 1.0);
+
+    visualization_msgs::MarkerArray markers;
+    markers.markers.push_back(identityLabelMarker("uav1", label_ar, ros::Time(7, 0)));
+    applyRobotMarkerLabel(&markers, 0U, RobotModelKind::kFs150, "/uav1");
+    foxglove_msgs::SceneUpdate update;
+    appendSceneEntityPart(RobotModelKind::kFs150, "uav1", SceneEntityPart::kArLabel, markers, 0U, ros::Time(7, 0),
+                           "world", blackLabelStyle(), &update);
+    ASSERT_EQ(update.entities.size(), 1U);
+    EXPECT_EQ(update.entities[0].id, "xgc2/px4/uav1/label_ar");
+    EXPECT_EQ(update.entities[0].frame_id, label_ar);
+    EXPECT_TRUE(update.entities[0].frame_locked);
+    ASSERT_EQ(update.entities[0].texts.size(), 1U);
+    EXPECT_EQ(update.entities[0].texts[0].text, "UAV 1");
+}
+
+TEST(ArIdentity, SceneArTopicIsNotTheFusedScene) {
+    EXPECT_STREQ(kIdentityArTopic, "/xgc/scene_ar");
+    EXPECT_STRNE(kIdentityArTopic, "/xgc/scene");
 }
 
 } // namespace
