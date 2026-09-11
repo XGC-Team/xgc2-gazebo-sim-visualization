@@ -607,6 +607,21 @@ TEST(WorldFixedFrameRoot, AdvertisesParentOnTfWithoutMovingDisplays) {
     EXPECT_DOUBLE_EQ(root.transform.rotation.w, 1.0);
 }
 
+TEST(AlgorithmOverlayFrameAlias, IdentityWorldToMapIsNotARobotBody) {
+    const ros::Time now(10, 0);
+    const geometry_msgs::TransformStamped alias = algorithmOverlayFrameAlias("world", now);
+    EXPECT_EQ(alias.header.frame_id, "world");
+    EXPECT_EQ(alias.child_frame_id, kAlgorithmOverlayFrame);
+    EXPECT_EQ(alias.header.stamp, now);
+    EXPECT_DOUBLE_EQ(alias.transform.translation.x, 0.0);
+    EXPECT_DOUBLE_EQ(alias.transform.translation.y, 0.0);
+    EXPECT_DOUBLE_EQ(alias.transform.translation.z, 0.0);
+    EXPECT_DOUBLE_EQ(alias.transform.rotation.w, 1.0);
+    EXPECT_FALSE(isWorldFixedFrame(kAlgorithmOverlayFrame));
+    EXPECT_THROW(algorithmOverlayFrameAlias("map", now), std::invalid_argument);
+    EXPECT_THROW(algorithmOverlayFrameAlias("odom", now), std::invalid_argument);
+}
+
 TEST(FrozenVisualizationRosterReady, AllowsMissingSiblingPoses) {
     EXPECT_FALSE(frozenVisualizationRosterReady(0U, 0U));
     EXPECT_TRUE(frozenVisualizationRosterReady(4U, 0U));

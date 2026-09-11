@@ -255,6 +255,13 @@ class GazeboAutoVisualizer {
             if (transform_topic_ != "/tf") {
                 tf_tree_pub_ = nh_.advertise<tf2_msgs::TFMessage>("/tf", 10, false);
             }
+            // Latch world→map so declared algorithm Path/Marker overlays in
+            // `map` can reach the viewer Fixed Frame without plant /tf.
+            tf_static_pub_ = nh_.advertise<tf2_msgs::TFMessage>("/tf_static", 1, true);
+            tf2_msgs::TFMessage overlay;
+            overlay.transforms.push_back(
+                gazebo_sim_visualization::algorithmOverlayFrameAlias(frame_id_, ros::Time(0)));
+            tf_static_pub_.publish(overlay);
             pose_transform_timer_ = nh_.createTimer(
                 ros::Duration(1.0 / pose_transform_publish_rate_),
                 &GazeboAutoVisualizer::publishPoseTransformsCallback, this);
@@ -897,6 +904,7 @@ class GazeboAutoVisualizer {
     // tree, which a physical fleet can publish just as well.
     ros::Publisher transform_pub_;
     ros::Publisher tf_tree_pub_;
+    ros::Publisher tf_static_pub_;
     std::string transform_topic_;
     std::map<std::string, TrackedModel> models_;
     std::map<std::string, PathPublisherRuntime> path_publishers_;

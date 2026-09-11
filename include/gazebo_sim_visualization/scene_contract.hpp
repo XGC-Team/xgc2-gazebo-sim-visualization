@@ -204,6 +204,13 @@ CanonicalWorldPose selectUavHeightProjectionWorldPose(HeightProjectionView view,
 constexpr const char* kWorldFixedFrameRootChild = "xgc_origin";
 geometry_msgs::TransformStamped worldFixedFrameRoot(const std::string& frame_id, const ros::Time& stamp);
 
+// Algorithm overlays (predicted Path, leader Path) keep the message frame_id
+// they declare, commonly `map`. The viewer Fixed Frame is `world`. This identity
+// is product-owned on /tf_static so Lichtblick can pose those overlays without
+// consuming plant /tf. It is not a robot body transform.
+constexpr const char* kAlgorithmOverlayFrame = "map";
+geometry_msgs::TransformStamped algorithmOverlayFrameAlias(const std::string& world_frame, const ros::Time& stamp);
+
 // Runtime readiness is "the frozen roster is configured and this node can
 // publish". Physical runs often have no VRPN, no camera, and only a subset of
 // robots on the field; missing sibling poses must not block Lichtblick or fail

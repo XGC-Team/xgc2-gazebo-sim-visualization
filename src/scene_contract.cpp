@@ -609,6 +609,18 @@ geometry_msgs::TransformStamped worldFixedFrameRoot(const std::string& frame_id,
     return origin;
 }
 
+geometry_msgs::TransformStamped algorithmOverlayFrameAlias(const std::string& world_frame, const ros::Time& stamp) {
+    if (!isWorldFixedFrame(world_frame)) {
+        throw std::invalid_argument("algorithm overlay alias parent must be the world Fixed Frame");
+    }
+    geometry_msgs::TransformStamped alias;
+    alias.header.stamp = stamp;
+    alias.header.frame_id = "world";
+    alias.child_frame_id = kAlgorithmOverlayFrame;
+    alias.transform.rotation.w = 1.0;
+    return alias;
+}
+
 bool frozenVisualizationRosterReady(std::size_t tracked_models, std::size_t world_poses) {
     return tracked_models > 0U && world_poses <= tracked_models;
 }
