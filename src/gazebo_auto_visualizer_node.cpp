@@ -254,16 +254,20 @@ class GazeboAutoVisualizer {
         if (publish_transforms_) {
             transform_pub_ = nh_.advertise<tf2_msgs::TFMessage>(transform_topic_, 10, false);
             // Advertise the Fixed Frame parent on /tf via a single identity
-            // child. Robot bodies stay on transform_topic_ (not /tf).
+            // child (RViz). Lichtblick scene-class 3D uses the /tf_static latch
+            // below, not this topic. Robot bodies stay on transform_topic_.
             if (transform_topic_ != "/tf") {
                 tf_tree_pub_ = nh_.advertise<tf2_msgs::TFMessage>("/tf", 10, false);
             }
-            // Latch world→map so declared algorithm Path/Marker overlays in
-            // `map` can reach the viewer Fixed Frame without plant /tf.
+            // Latch world→map (algorithm Path frame_id=map) and world→xgc_origin
+            // (Fixed Frame identity) on /tf_static. Lichtblick scene-class 3D
+            // does not subscribe to plant /tf; these identities are product-owned.
             tf_static_pub_ = nh_.advertise<tf2_msgs::TFMessage>("/tf_static", 1, true);
             tf2_msgs::TFMessage overlay;
             overlay.transforms.push_back(
                 gazebo_sim_visualization::algorithmOverlayFrameAlias(frame_id_, ros::Time(0)));
+            overlay.transforms.push_back(
+                gazebo_sim_visualization::worldFixedFrameRoot(frame_id_, ros::Time(0)));
             tf_static_pub_.publish(overlay);
             pose_transform_timer_ = nh_.createTimer(
                 ros::Duration(1.0 / pose_transform_publish_rate_),

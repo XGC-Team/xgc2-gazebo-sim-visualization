@@ -218,8 +218,9 @@ CanonicalWorldPose selectArIdentityWorldPose(RobotModelKind kind, const Canonica
                                                const CanonicalPoseSample& vrpn_already_offset,
                                                const ros::Time& now, double timeout_sec);
 
-// Identity child of the Fixed Frame published on /tf so RViz's Fixed Frame
-// (the parent) exists in the TF tree. Displays consume the parent, not the child.
+// Identity child of the Fixed Frame. Latched on /tf_static so Lichtblick 3D can
+// create `world` without plant /tf; also published on /tf for RViz. Displays
+// consume the parent, not the child.
 constexpr const char* kWorldFixedFrameRootChild = "xgc_origin";
 geometry_msgs::TransformStamped worldFixedFrameRoot(const std::string& frame_id, const ros::Time& stamp);
 

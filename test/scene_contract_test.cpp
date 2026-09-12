@@ -609,6 +609,9 @@ TEST(WorldFixedFrameRoot, AdvertisesParentOnTfWithoutMovingDisplays) {
     EXPECT_DOUBLE_EQ(root.transform.translation.y, 0.0);
     EXPECT_DOUBLE_EQ(root.transform.translation.z, 0.0);
     EXPECT_DOUBLE_EQ(root.transform.rotation.w, 1.0);
+    const geometry_msgs::TransformStamped latched = worldFixedFrameRoot("world", ros::Time(0));
+    EXPECT_TRUE(latched.header.stamp.isZero());
+    EXPECT_EQ(latched.child_frame_id, kWorldFixedFrameRootChild);
 }
 
 TEST(AlgorithmOverlayFrameAlias, IdentityWorldToMapIsNotARobotBody) {
