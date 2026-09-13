@@ -70,6 +70,7 @@ copy_required_path() {
 copy_required_path "${PREFIX_ROOT}/share/${ROS_PACKAGE}"
 copy_required_path "${PREFIX_ROOT}/lib/${ROS_PACKAGE}"
 copy_required_path "${PREFIX_ROOT}/lib/libgazebo_scene_contract.so"
+copy_required_path "${PREFIX_ROOT}/lib/libxgc2_gazebo_rendering.so"
 
 if [[ ! -x "${PKG_ROOT}${PREFIX}/lib/${ROS_PACKAGE}/gazebo_auto_visualizer_node" ]]; then
   echo "required package executable is missing: ${PREFIX}/lib/${ROS_PACKAGE}/gazebo_auto_visualizer_node" >&2
@@ -83,7 +84,7 @@ Section: misc
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: XGC2 <apt@example.com>
-Depends: ros-noetic-foxglove-msgs, ros-noetic-geometry-msgs, ros-noetic-mavros-msgs, ros-noetic-robot-state-publisher, ros-noetic-roscpp, ros-noetic-roslaunch, ros-noetic-rviz, ros-noetic-std-msgs, ros-noetic-tf2-ros, ros-noetic-visualization-msgs, ros-noetic-xgc2-robot-visualization (>= 0.2.0-10)
+Depends: libgazebo11, ros-noetic-foxglove-msgs, ros-noetic-geometry-msgs, ros-noetic-mavros-msgs, ros-noetic-robot-state-publisher, ros-noetic-roscpp, ros-noetic-roslaunch, ros-noetic-rviz, ros-noetic-std-msgs, ros-noetic-tf2-ros, ros-noetic-visualization-msgs, ros-noetic-xgc2-robot-visualization (>= 0.2.0-10)
 Description: XGC2 Gazebo Classic RViz and Lichtblick visualization tools
 EOF
 

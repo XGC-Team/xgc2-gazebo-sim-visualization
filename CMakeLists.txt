@@ -15,6 +15,8 @@ find_package(catkin REQUIRED COMPONENTS
   xgc2_robot_visualization
 )
 
+find_package(gazebo REQUIRED)
+
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES gazebo_scene_contract
@@ -33,6 +35,12 @@ include_directories(
   ${xgc2_robot_visualization_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
 )
+
+add_library(xgc2_gazebo_rendering SHARED src/gazebo_rendering_plugin.cpp)
+target_compile_features(xgc2_gazebo_rendering PRIVATE cxx_std_17)
+target_include_directories(xgc2_gazebo_rendering PRIVATE ${GAZEBO_INCLUDE_DIRS})
+target_link_libraries(xgc2_gazebo_rendering ${GAZEBO_LIBRARIES})
+install(TARGETS xgc2_gazebo_rendering LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
 
 add_library(gazebo_scene_contract
   src/scene_contract.cpp

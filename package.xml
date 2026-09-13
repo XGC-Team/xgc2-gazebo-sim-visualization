@@ -24,5 +24,7 @@
 
   <test_depend>roslaunch</test_depend>
 
+  <build_depend>gazebo_dev</build_depend>
+  <exec_depend>gazebo</exec_depend>
   <export/>
 </package>
