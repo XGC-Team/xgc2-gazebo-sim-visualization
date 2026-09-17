@@ -229,6 +229,7 @@ class GazeboAutoVisualizer {
         }
         configureFrozenRoster();
         subscribeCanonicalPoses();
+        resubscribeUgvMotionFromSlots();
         scene_ready_pub_ = nh_.advertise<std_msgs::Empty>("/xgc/robot_scene/ready", 1, true);
 
         if (publish_markers_) {
@@ -412,6 +413,29 @@ class GazeboAutoVisualizer {
         }
     }
 
+    void resubscribeUgvMotionFromSlots() {
+        for (auto& entry : models_) {
+            TrackedModel& model = entry.second;
+            if (model.kind == gazebo_sim_visualization::RobotModelKind::kFs150) {
+                continue;
+            }
+            const std::string identity = slotTopicIdentity(model);
+            model.cmd_vel_subscriber.shutdown();
+            model.twist_subscriber.shutdown();
+            model.cmd_vel_subscriber = subscribeUgvCmdVel(model.name, identity);
+            model.twist_subscriber = subscribeUgvTwist(model.name, identity);
+            ROS_INFO("[gazebo_auto_visualizer] Viewer cmd/twist for scene model '%s' slot '%s' are /%s/cmd_vel /%s/twist",
+                     model.name.c_str(), model.slot_name.c_str(), identity.c_str(), identity.c_str());
+        }
+    }
+
+    std::string slotTopicIdentity(const TrackedModel& model) const {
+        if (model.ros_namespace.size() >= 2U && model.ros_namespace.front() == '/') {
+            return model.ros_namespace.substr(1);
+        }
+        return model.name;
+    }
+
     std::map<std::string, TrackedModel>::iterator ensureTrackedModel(const std::string& name,
                                                                      gazebo_sim_visualization::RobotModelKind kind) {
         auto existing = models_.find(name);
@@ -428,8 +452,8 @@ class GazeboAutoVisualizer {
             model.mavros_state_subscriber = subscribeMavrosState(name);
             model.mavros_extended_state_subscriber = subscribeMavrosExtendedState(name);
         } else {
-            model.cmd_vel_subscriber = subscribeUgvCmdVel(name);
-            model.twist_subscriber = subscribeUgvTwist(name);
+            model.cmd_vel_subscriber = subscribeUgvCmdVel(name, name);
+            model.twist_subscriber = subscribeUgvTwist(name, name);
         }
         auto inserted = models_.emplace(name, std::move(model)).first;
         const char* kind_name = "scout";
@@ -483,19 +507,20 @@ class GazeboAutoVisualizer {
         });
     }
 
-    ros::Subscriber subscribeUgvCmdVel(const std::string& name) {
-        const std::string topic = modelScopedTopic(name, ugv_cmd_vel_topic_suffix_, "/cmd_vel");
-        return nh_.subscribe<geometry_msgs::Twist>(topic, 10, [this, name](const geometry_msgs::TwistConstPtr& msg) {
-            ugvCmdVelCallback(name, msg);
-        });
+    ros::Subscriber subscribeUgvCmdVel(const std::string& scene_model, const std::string& topic_identity) {
+        const std::string topic = modelScopedTopic(topic_identity, ugv_cmd_vel_topic_suffix_, "/cmd_vel");
+        return nh_.subscribe<geometry_msgs::Twist>(
+            topic, 10, [this, scene_model](const geometry_msgs::TwistConstPtr& msg) {
+                ugvCmdVelCallback(scene_model, msg);
+            });
     }
 
-    ros::Subscriber subscribeUgvTwist(const std::string& name) {
-        const std::string topic = modelScopedTopic(name, ugv_twist_topic_suffix_, "/twist");
-        return nh_.subscribe<geometry_msgs::TwistStamped>(topic, 10,
-                                                          [this, name](const geometry_msgs::TwistStampedConstPtr& msg) {
-                                                              ugvTwistCallback(name, msg);
-                                                          });
+    ros::Subscriber subscribeUgvTwist(const std::string& scene_model, const std::string& topic_identity) {
+        const std::string topic = modelScopedTopic(topic_identity, ugv_twist_topic_suffix_, "/twist");
+        return nh_.subscribe<geometry_msgs::TwistStamped>(
+            topic, 10, [this, scene_model](const geometry_msgs::TwistStampedConstPtr& msg) {
+                ugvTwistCallback(scene_model, msg);
+            });
     }
 
     std::string modelScopedTopic(const std::string& name, const std::string& suffix,

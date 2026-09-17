@@ -59,6 +59,19 @@ geometry_msgs::Pose copyPose(const geometry_msgs::Pose& source) {
     return result;
 }
 
+// Scout display Z is Gazebo sitting height (ground_truth chassis z), not
+// mocap marker height and not a hard chassis origin at 0. History Path
+// still flattens separately.
+double slotDisplayBodyZ(RobotModelKind kind, double pose_z) {
+    if (kind == RobotModelKind::kScout) {
+        return xgc2_robot_visualization::scoutDisplayBodyZ();
+    }
+    if (kind == RobotModelKind::kMecanum) {
+        return xgc2_robot_visualization::mecanumDisplayBodyZ();
+    }
+    return pose_z;
+}
+
 foxglove_msgs::Color copyColor(const std_msgs::ColorRGBA& source) {
     foxglove_msgs::Color result;
     result.r = source.r;
@@ -358,13 +371,15 @@ canonicalRobotPoseTransforms(RobotModelKind kind, const std::string& scene_model
         throw std::invalid_argument("canonical Robot pose transform requires a concrete kind");
     }
 
+    const double body_z = slotDisplayBodyZ(kind, pose.position.z);
+
     geometry_msgs::TransformStamped body;
     body.header.stamp = stamp;
     body.header.frame_id = frame_id;
     body.child_frame_id = xgc2_robot_visualization::robotBodyFrame(scene_model);
     body.transform.translation.x = pose.position.x;
     body.transform.translation.y = pose.position.y;
-    body.transform.translation.z = pose.position.z;
+    body.transform.translation.z = body_z;
     body.transform.rotation = normalizedQuaternion(pose.orientation);
 
     geometry_msgs::TransformStamped label;
@@ -372,7 +387,7 @@ canonicalRobotPoseTransforms(RobotModelKind kind, const std::string& scene_model
     label.child_frame_id = xgc2_robot_visualization::robotLabelFrame(scene_model);
     label.transform.translation.x = pose.position.x;
     label.transform.translation.y = pose.position.y;
-    label.transform.translation.z = pose.position.z + label_height;
+    label.transform.translation.z = body_z + label_height;
     label.transform.rotation.w = 1.0;
     return {body, label};
 }
@@ -405,7 +420,8 @@ geometry_msgs::TransformStamped canonicalArIdentityLabelTransform(
     label.child_frame_id = xgc2_robot_visualization::robotFramePrefix(scene_model) + "/label_ar";
     label.transform.translation.x = pose.position.x;
     label.transform.translation.y = pose.position.y;
-    label.transform.translation.z = pose.position.z + identityLabelHeight(kind, offsets);
+    label.transform.translation.z =
+        slotDisplayBodyZ(kind, pose.position.z) + identityLabelHeight(kind, offsets);
     label.transform.rotation.w = 1.0;
     return label;
 }

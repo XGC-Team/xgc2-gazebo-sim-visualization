@@ -1,4 +1,5 @@
 #include "gazebo_sim_visualization/scene_contract.hpp"
+#include "xgc2_robot_visualization/path_history.hpp"
 #include "xgc2_robot_visualization/robot_frames.hpp"
 
 #include <array>
@@ -19,6 +20,16 @@ namespace {
 
 SceneLabelStyle blackLabelStyle() {
     return sceneLabelStyleFromMarkerColor("#000000");
+}
+
+double displayBodyZ(RobotModelKind kind, double pose_z) {
+    if (kind == RobotModelKind::kScout) {
+        return xgc2_robot_visualization::scoutDisplayBodyZ();
+    }
+    if (kind == RobotModelKind::kMecanum) {
+        return xgc2_robot_visualization::mecanumDisplayBodyZ();
+    }
+    return pose_z;
 }
 
 TEST(SceneContract, MarkerColorIsStrictAndProducesOpaqueTextWithUnifiedFontSize) {
@@ -91,14 +102,15 @@ TEST(SceneContract, ConfiguredLabelStyleAndOffsetsPreserveUprightAnchors) {
         for (std::size_t i = 0; i < 3; ++i) {
             const auto transforms = canonicalRobotPoseTransforms(kinds[i], names[i], pose, ros::Time(42), "world", offsets);
             ASSERT_EQ(transforms.size(), 2U);
-            EXPECT_DOUBLE_EQ(transforms[0].transform.translation.z, 4.0);
+            const double body_z = displayBodyZ(kinds[i], pose.position.z);
+            EXPECT_DOUBLE_EQ(transforms[0].transform.translation.z, body_z);
             EXPECT_DOUBLE_EQ(transforms[0].transform.rotation.x, pose.orientation.x);
             const auto& anchor = transforms[1];
             EXPECT_EQ(anchor.header.frame_id, "world");
             EXPECT_EQ(anchor.child_frame_id, "xgc/robots/" + std::string(names[i]) + "/label");
             EXPECT_DOUBLE_EQ(anchor.transform.translation.x, 3.0);
             EXPECT_DOUBLE_EQ(anchor.transform.translation.y, -2.0);
-            EXPECT_DOUBLE_EQ(anchor.transform.translation.z, 4.0 + heights[i]);
+            EXPECT_DOUBLE_EQ(anchor.transform.translation.z, body_z + heights[i]);
             EXPECT_DOUBLE_EQ(anchor.transform.rotation.x, 0.0);
             EXPECT_DOUBLE_EQ(anchor.transform.rotation.y, 0.0);
             EXPECT_DOUBLE_EQ(anchor.transform.rotation.z, 0.0);
@@ -222,13 +234,49 @@ TEST(SceneContract, CanonicalPosePublishesOnlyBodyAndUprightLabelTransforms) {
         EXPECT_EQ(transforms[0].header.stamp, stamp);
         EXPECT_DOUBLE_EQ(transforms[0].transform.translation.x, pose.position.x);
         EXPECT_NEAR(transforms[0].transform.rotation.z, std::sqrt(0.5), 1.0e-12);
-        EXPECT_DOUBLE_EQ(transforms[1].transform.translation.z, pose.position.z + test_case.label_height);
+        const double body_z = displayBodyZ(test_case.kind, pose.position.z);
+        EXPECT_DOUBLE_EQ(transforms[0].transform.translation.z, body_z);
+        EXPECT_DOUBLE_EQ(transforms[1].transform.translation.z, body_z + test_case.label_height);
         EXPECT_DOUBLE_EQ(transforms[1].transform.rotation.w, 1.0);
     }
     EXPECT_THROW(canonicalRobotPoseTransforms(RobotModelKind::kNone, "uav1", pose, stamp, "world"),
                  std::invalid_argument);
     EXPECT_THROW(canonicalRobotPoseTransforms(RobotModelKind::kFs150, "uav1", pose, ros::Time(), "world"),
                  std::invalid_argument);
+}
+
+TEST(SceneContract, GroundVehicleBodyTransformSitsWheelsOnTheXYPlane) {
+    geometry_msgs::Pose pose;
+    pose.position.x = -6.01;
+    pose.position.y = -6.00;
+    pose.position.z = 0.504;
+    pose.orientation.w = 1.0;
+    const ros::Time stamp(17, 0);
+    const SceneLabelOffsets offsets{};
+
+    const auto scout = canonicalRobotPoseTransforms(RobotModelKind::kScout, "ugv5", pose, stamp, "world", offsets);
+    ASSERT_EQ(scout.size(), 2U);
+    EXPECT_DOUBLE_EQ(scout[0].transform.translation.x, pose.position.x);
+    EXPECT_DOUBLE_EQ(scout[0].transform.translation.y, pose.position.y);
+    EXPECT_DOUBLE_EQ(scout[0].transform.translation.z, xgc2_robot_visualization::kScoutGazeboChassisZ);
+    EXPECT_NEAR(scout[0].transform.translation.z,
+                xgc2_robot_visualization::kScoutVisualWheelRadius - xgc2_robot_visualization::kScoutVisualWheelAxleZ,
+                0.002);
+    EXPECT_DOUBLE_EQ(scout[1].transform.translation.z, xgc2_robot_visualization::scoutDisplayBodyZ() + 0.65);
+
+    const auto mecanum =
+        canonicalRobotPoseTransforms(RobotModelKind::kMecanum, "ugv2", pose, stamp, "world", offsets);
+    ASSERT_EQ(mecanum.size(), 2U);
+    EXPECT_DOUBLE_EQ(mecanum[0].transform.translation.z, xgc2_robot_visualization::mecanumDisplayBodyZ());
+    EXPECT_DOUBLE_EQ(mecanum[1].transform.translation.z, 0.32);
+
+    const auto uav = canonicalRobotPoseTransforms(RobotModelKind::kFs150, "uav1", pose, stamp, "world", offsets);
+    ASSERT_EQ(uav.size(), 2U);
+    EXPECT_DOUBLE_EQ(uav[0].transform.translation.z, 0.504);
+    EXPECT_DOUBLE_EQ(uav[1].transform.translation.z, 0.504 + 0.55);
+
+    const auto ar = canonicalArIdentityLabelTransform(RobotModelKind::kScout, "ugv5", pose, stamp, "world", offsets);
+    EXPECT_DOUBLE_EQ(ar.transform.translation.z, xgc2_robot_visualization::scoutDisplayBodyZ() + 0.65);
 }
 
 TEST(SceneContract, ScoutMarkersBecomeScoutSceneEntity) {

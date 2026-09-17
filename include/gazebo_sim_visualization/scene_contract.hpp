@@ -136,12 +136,14 @@ std::string slotVisualizationPoseTopic(RobotModelKind kind, const std::string& r
 
 // History `/<slot>/path` sample for the viewer. Scout/Mecanum force world z to
 // 0 so mocap marker height does not float the trail; FS150 keeps fused z.
-// Body TF is unchanged.
+// Body TF is pinned the same way; canonical /pose is unchanged.
 geometry_msgs::Pose slotHistoryPathPose(RobotModelKind kind, geometry_msgs::Pose world_pose);
 
 // Convert one corrected canonical Robot pose into the only high-rate viewer
 // facts: the body transform and its upright overhead label anchor. Meshes and
 // label text stay static; rotor/wheel joints use their own bounded cadence.
+// Scout / Mecanum body and label XY follow /pose; world Z is pinned to 0 so
+// the mesh sits on the ground. UAV keeps /pose.z. Canonical /pose is unchanged.
 std::vector<geometry_msgs::TransformStamped>
 canonicalRobotPoseTransforms(RobotModelKind kind, const std::string& scene_model,
                              const geometry_msgs::Pose& pose, const ros::Time& stamp,
