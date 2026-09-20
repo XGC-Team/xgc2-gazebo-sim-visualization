@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -224,6 +225,163 @@ foxglove_msgs::SceneEntityDeletion uavHeightProjectionDeletion(const std::string
     deletion.type = foxglove_msgs::SceneEntityDeletion::MATCHING_ID;
     deletion.id = scene_model + "/height_projection";
     return deletion;
+}
+
+namespace {
+
+bool jsonNullMember(const std::string& text, const std::string& key) {
+    const std::regex pattern("\"" + key + "\"\\s*:\\s*null");
+    return std::regex_search(text, pattern);
+}
+
+bool jsonNumberMember(const std::string& text, const std::string& key, double* value) {
+    const std::regex pattern("\"" + key + "\"\\s*:\\s*([-+0-9.eE]+)");
+    std::smatch match;
+    if (!std::regex_search(text, match, pattern) || value == nullptr) {
+        return false;
+    }
+    char* end = nullptr;
+    const double parsed = std::strtod(match[1].str().c_str(), &end);
+    if (end == nullptr || *end != '\0' || !std::isfinite(parsed)) {
+        return false;
+    }
+    *value = parsed;
+    return true;
+}
+
+std::string jsonObjectMember(const std::string& text, const std::string& key) {
+    const std::string needle = "\"" + key + "\"";
+    const auto key_pos = text.find(needle);
+    if (key_pos == std::string::npos) {
+        return std::string();
+    }
+    const auto colon = text.find(':', key_pos + needle.size());
+    if (colon == std::string::npos) {
+        throw std::invalid_argument("XGC2_WORLD_BOUNDARY is not canonical worldBoundary JSON");
+    }
+    std::size_t cursor = colon + 1;
+    while (cursor < text.size() && std::isspace(static_cast<unsigned char>(text[cursor])) != 0) {
+        ++cursor;
+    }
+    if (cursor >= text.size()) {
+        throw std::invalid_argument("XGC2_WORLD_BOUNDARY is not canonical worldBoundary JSON");
+    }
+    if (text.compare(cursor, 4, "null") == 0) {
+        return "null";
+    }
+    if (text[cursor] != '{') {
+        throw std::invalid_argument("XGC2_WORLD_BOUNDARY controlBounds must be an object or null");
+    }
+    int depth = 0;
+    for (std::size_t end = cursor; end < text.size(); ++end) {
+        if (text[end] == '{') {
+            ++depth;
+        } else if (text[end] == '}') {
+            --depth;
+            if (depth == 0) {
+                return text.substr(cursor, end - cursor + 1);
+            }
+        }
+    }
+    throw std::invalid_argument("XGC2_WORLD_BOUNDARY controlBounds is truncated");
+}
+
+}  // namespace
+
+WorldBoundaryDisplay parseWorldBoundaryDisplay(const std::string& json) {
+    WorldBoundaryDisplay result;
+    const std::string text = trim(json);
+    if (text.empty()) {
+        return result;
+    }
+    if (text.front() != '{' || text.back() != '}') {
+        throw std::invalid_argument("XGC2_WORLD_BOUNDARY must be canonical Experiment worldBoundary JSON");
+    }
+    double schema_version = 0.0;
+    if (jsonNumberMember(text, "schemaVersion", &schema_version) && schema_version != 1.0) {
+        throw std::invalid_argument("XGC2_WORLD_BOUNDARY schemaVersion must be 1");
+    }
+    const std::string bounds_json = jsonObjectMember(text, "controlBounds");
+    bool has_bounds = false;
+    if (!bounds_json.empty() && bounds_json != "null") {
+        if (!jsonNumberMember(bounds_json, "xMin", &result.x_min) || !jsonNumberMember(bounds_json, "xMax", &result.x_max) ||
+            !jsonNumberMember(bounds_json, "yMin", &result.y_min) || !jsonNumberMember(bounds_json, "yMax", &result.y_max)) {
+            throw std::invalid_argument("XGC2_WORLD_BOUNDARY controlBounds requires finite XY min/max");
+        }
+        double z_min = 0.0;
+        double z_max = 0.0;
+        if (!jsonNumberMember(bounds_json, "zMin", &z_min) || !jsonNumberMember(bounds_json, "zMax", &z_max) ||
+            !(result.x_min < result.x_max) || !(result.y_min < result.y_max) || !(z_min < z_max)) {
+            throw std::invalid_argument("XGC2_WORLD_BOUNDARY controlBounds requires min < max on each axis");
+        }
+        has_bounds = true;
+    }
+    double ground_z = 0.0;
+    const bool has_ground = jsonNumberMember(text, "groundZ", &ground_z);
+    if (!has_ground && !jsonNullMember(text, "groundZ") && text.find("\"groundZ\"") != std::string::npos) {
+        throw std::invalid_argument("XGC2_WORLD_BOUNDARY groundZ must be a finite metre value or null");
+    }
+    result.ground_z = ground_z;
+    result.displayable = has_bounds && has_ground;
+    return result;
+}
+
+foxglove_msgs::SceneEntity worldBoundaryEntity(const WorldBoundaryDisplay& boundary, const ros::Time& stamp,
+                                               const std::string& frame_id) {
+    if (!boundary.displayable || stamp.isZero() || !isWorldFixedFrame(frame_id)) {
+        throw std::invalid_argument("world fence display requires configured XY, groundZ, world frame, and timestamp");
+    }
+    foxglove_msgs::SceneEntity entity;
+    entity.id = kWorldBoundaryEntityId;
+    entity.frame_id = frame_id;
+    entity.timestamp = stamp;
+
+    foxglove_msgs::LinePrimitive loop;
+    loop.type = foxglove_msgs::LinePrimitive::LINE_LOOP;
+    loop.pose.orientation.w = 1.0;
+    loop.thickness = 0.03;
+    loop.scale_invariant = false;
+    loop.color.r = 0.45;
+    loop.color.g = 0.45;
+    loop.color.b = 0.45;
+    loop.color.a = 0.85;
+    const double corners[4][2] = {
+        {boundary.x_min, boundary.y_min},
+        {boundary.x_max, boundary.y_min},
+        {boundary.x_max, boundary.y_max},
+        {boundary.x_min, boundary.y_max},
+    };
+    for (const auto& corner : corners) {
+        geometry_msgs::Point point;
+        point.x = corner[0];
+        point.y = corner[1];
+        point.z = boundary.ground_z;
+        loop.points.push_back(point);
+    }
+    entity.lines.push_back(std::move(loop));
+    return entity;
+}
+
+foxglove_msgs::SceneEntityDeletion worldBoundaryDeletion(const ros::Time& stamp) {
+    if (stamp.isZero()) {
+        throw std::invalid_argument("world fence deletion requires a timestamp");
+    }
+    foxglove_msgs::SceneEntityDeletion deletion;
+    deletion.timestamp = stamp;
+    deletion.type = foxglove_msgs::SceneEntityDeletion::MATCHING_ID;
+    deletion.id = kWorldBoundaryEntityId;
+    return deletion;
+}
+
+foxglove_msgs::SceneUpdate worldBoundarySceneUpdate(const WorldBoundaryDisplay& boundary, const ros::Time& stamp,
+                                                    const std::string& frame_id) {
+    foxglove_msgs::SceneUpdate update;
+    if (boundary.displayable) {
+        update.entities.push_back(worldBoundaryEntity(boundary, stamp, frame_id));
+    } else {
+        update.deletions.push_back(worldBoundaryDeletion(stamp));
+    }
+    return update;
 }
 
 geometry_msgs::Point applyExperimentWorldOffsetOnce(geometry_msgs::Point position,
