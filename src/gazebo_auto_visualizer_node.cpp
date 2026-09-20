@@ -249,6 +249,13 @@ class GazeboAutoVisualizer {
             scene_ar_pub_ = nh_.advertise<foxglove_msgs::SceneUpdate>(
                 gazebo_sim_visualization::kIdentityArTopic, 1, true);
             publishSceneReset(scene_ar_pub_);
+            world_boundary_pub_ = nh_.advertise<foxglove_msgs::SceneUpdate>(
+                gazebo_sim_visualization::kWorldBoundaryTopic, 1, true);
+            publishSceneReset(world_boundary_pub_);
+            world_boundary_ar_pub_ = nh_.advertise<foxglove_msgs::SceneUpdate>(
+                gazebo_sim_visualization::kWorldBoundaryArTopic, 1, true);
+            publishSceneReset(world_boundary_ar_pub_);
+            publishWorldBoundaryLatch();
         }
         joint_transform_cadence_.reset(new gazebo_sim_visualization::PublishCadence(joint_transform_publish_rate_));
 
@@ -832,6 +839,20 @@ class GazeboAutoVisualizer {
         publisher.publish(update);
     }
 
+    void publishWorldBoundaryLatch() {
+        const char* raw = std::getenv("XGC2_WORLD_BOUNDARY");
+        const gazebo_sim_visualization::WorldBoundaryDisplay boundary =
+            gazebo_sim_visualization::parseWorldBoundaryDisplay(raw == nullptr ? "" : raw);
+        ros::Time stamp = ros::Time::now();
+        if (stamp.isZero()) {
+            stamp = ros::Time(1, 0);
+        }
+        const foxglove_msgs::SceneUpdate update =
+            gazebo_sim_visualization::worldBoundarySceneUpdate(boundary, stamp, frame_id_);
+        world_boundary_pub_.publish(update);
+        world_boundary_ar_pub_.publish(update);
+    }
+
     void publishCallback(const ros::TimerEvent&) {
         const ros::Time now = ros::Time::now();
         gazebo_sim_visualization::SceneUpdateCadenceDecision scene_decision;
@@ -974,6 +995,8 @@ class GazeboAutoVisualizer {
     std::map<std::string, foxglove_msgs::SceneEntity> height_projection_ar_entities_;
     ros::Publisher scene_ar_pub_;
     std::map<std::string, foxglove_msgs::SceneEntity> ar_identity_entities_;
+    ros::Publisher world_boundary_pub_;
+    ros::Publisher world_boundary_ar_pub_;
     ros::Publisher scene_ready_pub_;
     ros::Timer publish_timer_;
     ros::Timer pose_transform_timer_;

@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <foxglove_msgs/LinePrimitive.h>
 #include <geometry_msgs/Pose.h>
 #include <gtest/gtest.h>
 #include <ros/serialization.h>
@@ -824,6 +825,53 @@ TEST(UavHeightProjection, TopicsAreDistinctPublishers) {
     EXPECT_STREQ(kUavHeightProjectionTopic, "/xgc/uav_height_projection");
     EXPECT_STREQ(kUavHeightProjectionArTopic, "/xgc/uav_height_projection_ar");
     EXPECT_STRNE(kUavHeightProjectionTopic, kUavHeightProjectionArTopic);
+}
+
+TEST(WorldBoundary, EmptyEnvAndNullObjectAreNotDisplayable) {
+    EXPECT_FALSE(parseWorldBoundaryDisplay("").displayable);
+    EXPECT_FALSE(parseWorldBoundaryDisplay("  ").displayable);
+    const auto unconfigured = parseWorldBoundaryDisplay(
+        R"({"schemaVersion":1,"frameId":"world","unit":"m","controlBounds":null,"groundZ":null})");
+    EXPECT_FALSE(unconfigured.displayable);
+    const auto xy_only = parseWorldBoundaryDisplay(
+        R"({"schemaVersion":1,"frameId":"world","unit":"m","controlBounds":{"xMin":-12,"xMax":12,"yMin":-7,"yMax":7,"zMin":-1,"zMax":2},"groundZ":null})");
+    EXPECT_FALSE(xy_only.displayable);
+}
+
+TEST(WorldBoundary, DisplayableLoopUsesGroundZNotZMin) {
+    const auto boundary = parseWorldBoundaryDisplay(
+        R"({"schemaVersion":1,"frameId":"world","unit":"m","controlBounds":{"xMin":-12,"xMax":12,"yMin":-7,"yMax":7,"zMin":-1,"zMax":2},"groundZ":0.18})");
+    ASSERT_TRUE(boundary.displayable);
+    EXPECT_DOUBLE_EQ(boundary.x_min, -12.0);
+    EXPECT_DOUBLE_EQ(boundary.x_max, 12.0);
+    EXPECT_DOUBLE_EQ(boundary.y_min, -7.0);
+    EXPECT_DOUBLE_EQ(boundary.y_max, 7.0);
+    EXPECT_DOUBLE_EQ(boundary.ground_z, 0.18);
+    EXPECT_NE(boundary.ground_z, -1.0);
+    const auto entity = worldBoundaryEntity(boundary, ros::Time(1, 0), "world");
+    EXPECT_EQ(entity.id, kWorldBoundaryEntityId);
+    EXPECT_EQ(entity.frame_id, "world");
+    ASSERT_EQ(entity.lines.size(), 1U);
+    EXPECT_EQ(entity.lines[0].type, foxglove_msgs::LinePrimitive::LINE_LOOP);
+    ASSERT_EQ(entity.lines[0].points.size(), 4U);
+    EXPECT_DOUBLE_EQ(entity.lines[0].points[0].x, -12.0);
+    EXPECT_DOUBLE_EQ(entity.lines[0].points[0].y, -7.0);
+    EXPECT_DOUBLE_EQ(entity.lines[0].points[0].z, 0.18);
+    EXPECT_DOUBLE_EQ(entity.lines[0].points[2].x, 12.0);
+    EXPECT_DOUBLE_EQ(entity.lines[0].points[2].y, 7.0);
+    EXPECT_DOUBLE_EQ(entity.lines[0].points[2].z, 0.18);
+    const auto hidden = worldBoundarySceneUpdate(WorldBoundaryDisplay{}, ros::Time(1, 0), "world");
+    ASSERT_EQ(hidden.deletions.size(), 1U);
+    EXPECT_EQ(hidden.deletions[0].id, kWorldBoundaryEntityId);
+    EXPECT_TRUE(hidden.entities.empty());
+}
+
+TEST(WorldBoundary, TopicsAreDistinctFromScene) {
+    EXPECT_STREQ(kWorldBoundaryTopic, "/xgc/world_boundary");
+    EXPECT_STREQ(kWorldBoundaryArTopic, "/xgc/world_boundary_ar");
+    EXPECT_STRNE(kWorldBoundaryTopic, kIdentityArTopic);
+    EXPECT_STRNE(kWorldBoundaryTopic, "/xgc/scene");
+    EXPECT_STRNE(kWorldBoundaryTopic, kWorldBoundaryArTopic);
 }
 
 TEST(ArIdentity, ImagePaneUsesOffsetVrpnAndIgnoresFusedLocal) {

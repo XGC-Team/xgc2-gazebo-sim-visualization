@@ -51,6 +51,9 @@ struct SceneLabelStyle {
 constexpr const char* kUavHeightProjectionTopic = "/xgc/uav_height_projection";
 constexpr const char* kUavHeightProjectionArTopic = "/xgc/uav_height_projection_ar";
 constexpr const char* kIdentityArTopic = "/xgc/scene_ar";
+constexpr const char* kWorldBoundaryTopic = "/xgc/world_boundary";
+constexpr const char* kWorldBoundaryArTopic = "/xgc/world_boundary_ar";
+constexpr const char* kWorldBoundaryEntityId = "world_boundary";
 
 enum class HeightProjectionView { kLocalPosition, kVrpn };
 
@@ -64,6 +67,25 @@ foxglove_msgs::SceneEntity uavHeightProjectionEntity(
 
 foxglove_msgs::SceneEntityDeletion uavHeightProjectionDeletion(const std::string& scene_model,
                                                                const ros::Time& stamp);
+
+struct WorldBoundaryDisplay {
+    bool displayable{false};
+    double x_min{0.0};
+    double x_max{0.0};
+    double y_min{0.0};
+    double y_max{0.0};
+    double ground_z{0.0};
+};
+
+// Empty env is unconfigured. Canonical JSON with XY bounds and finite groundZ
+// is displayable. groundZ is never taken from zMin.
+WorldBoundaryDisplay parseWorldBoundaryDisplay(const std::string& json);
+
+foxglove_msgs::SceneEntity worldBoundaryEntity(const WorldBoundaryDisplay& boundary, const ros::Time& stamp,
+                                               const std::string& frame_id);
+foxglove_msgs::SceneEntityDeletion worldBoundaryDeletion(const ros::Time& stamp);
+foxglove_msgs::SceneUpdate worldBoundarySceneUpdate(const WorldBoundaryDisplay& boundary, const ros::Time& stamp,
+                                                    const std::string& frame_id);
 
 // Experiment world offset is applied once to a VRPN sample. Callers must not
 // add it again in geometry construction.
