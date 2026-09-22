@@ -54,6 +54,9 @@ constexpr const char* kIdentityArTopic = "/xgc/scene_ar";
 constexpr const char* kWorldBoundaryTopic = "/xgc/world_boundary";
 constexpr const char* kWorldBoundaryArTopic = "/xgc/world_boundary_ar";
 constexpr const char* kWorldBoundaryEntityId = "world_boundary";
+constexpr const char* kWorldBoundaryWallsTopic = "/xgc/world_boundary_walls";
+constexpr const char* kWorldBoundaryWallsArTopic = "/xgc/world_boundary_walls_ar";
+constexpr const char* kWorldBoundaryWallsEntityId = "world_boundary_walls";
 
 enum class HeightProjectionView { kLocalPosition, kVrpn };
 
@@ -74,6 +77,8 @@ struct WorldBoundaryDisplay {
     double x_max{0.0};
     double y_min{0.0};
     double y_max{0.0};
+    double z_min{0.0};
+    double z_max{0.0};
     double ground_z{0.0};
 };
 
@@ -86,6 +91,12 @@ foxglove_msgs::SceneEntity worldBoundaryEntity(const WorldBoundaryDisplay& bound
 foxglove_msgs::SceneEntityDeletion worldBoundaryDeletion(const ros::Time& stamp);
 foxglove_msgs::SceneUpdate worldBoundarySceneUpdate(const WorldBoundaryDisplay& boundary, const ros::Time& stamp,
                                                     const std::string& frame_id);
+
+foxglove_msgs::SceneEntity worldWallsEntity(const WorldBoundaryDisplay& boundary, const ros::Time& stamp,
+                                            const std::string& frame_id);
+foxglove_msgs::SceneEntityDeletion worldWallsDeletion(const ros::Time& stamp);
+foxglove_msgs::SceneUpdate worldWallsSceneUpdate(const WorldBoundaryDisplay& boundary, const ros::Time& stamp,
+                                                 const std::string& frame_id);
 
 // Experiment world offset is applied once to a VRPN sample. Callers must not
 // add it again in geometry construction.

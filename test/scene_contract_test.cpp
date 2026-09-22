@@ -853,6 +853,11 @@ TEST(WorldBoundary, DisplayableLoopUsesGroundZNotZMin) {
     EXPECT_EQ(entity.frame_id, "world");
     ASSERT_EQ(entity.lines.size(), 1U);
     EXPECT_EQ(entity.lines[0].type, foxglove_msgs::LinePrimitive::LINE_LOOP);
+    EXPECT_DOUBLE_EQ(entity.lines[0].thickness, 0.06);
+    EXPECT_DOUBLE_EQ(entity.lines[0].color.r, 1.0);
+    EXPECT_DOUBLE_EQ(entity.lines[0].color.g, 0.2);
+    EXPECT_DOUBLE_EQ(entity.lines[0].color.b, 0.15);
+    EXPECT_DOUBLE_EQ(entity.lines[0].color.a, 1.0);
     ASSERT_EQ(entity.lines[0].points.size(), 4U);
     EXPECT_DOUBLE_EQ(entity.lines[0].points[0].x, -12.0);
     EXPECT_DOUBLE_EQ(entity.lines[0].points[0].y, -7.0);
@@ -872,6 +877,73 @@ TEST(WorldBoundary, TopicsAreDistinctFromScene) {
     EXPECT_STRNE(kWorldBoundaryTopic, kIdentityArTopic);
     EXPECT_STRNE(kWorldBoundaryTopic, "/xgc/scene");
     EXPECT_STRNE(kWorldBoundaryTopic, kWorldBoundaryArTopic);
+}
+
+TEST(WorldBoundaryWalls, DisplayableBoundsBuildFourTranslucentRedWalls) {
+    const auto boundary = parseWorldBoundaryDisplay(
+        R"({"schemaVersion":1,"frameId":"world","unit":"m","controlBounds":{"xMin":-12,"xMax":12,"yMin":-7,"yMax":7,"zMin":-1,"zMax":2},"groundZ":0.18})");
+    ASSERT_TRUE(boundary.displayable);
+    EXPECT_DOUBLE_EQ(boundary.z_min, -1.0);
+    EXPECT_DOUBLE_EQ(boundary.z_max, 2.0);
+    const auto entity = worldWallsEntity(boundary, ros::Time(1, 0), "world");
+    EXPECT_EQ(entity.id, kWorldBoundaryWallsEntityId);
+    EXPECT_EQ(entity.frame_id, "world");
+    ASSERT_EQ(entity.cubes.size(), 4U);
+
+    EXPECT_DOUBLE_EQ(entity.cubes[0].pose.position.x, -12.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[0].pose.position.y, 0.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[0].pose.position.z, 0.5);
+    EXPECT_DOUBLE_EQ(entity.cubes[0].size.x, 0.02);
+    EXPECT_DOUBLE_EQ(entity.cubes[0].size.y, 14.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[0].size.z, 3.0);
+
+    EXPECT_DOUBLE_EQ(entity.cubes[1].pose.position.x, 12.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[1].pose.position.y, 0.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[1].pose.position.z, 0.5);
+    EXPECT_DOUBLE_EQ(entity.cubes[1].size.x, 0.02);
+    EXPECT_DOUBLE_EQ(entity.cubes[1].size.y, 14.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[1].size.z, 3.0);
+
+    EXPECT_DOUBLE_EQ(entity.cubes[2].pose.position.x, 0.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[2].pose.position.y, -7.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[2].pose.position.z, 0.5);
+    EXPECT_DOUBLE_EQ(entity.cubes[2].size.x, 24.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[2].size.y, 0.02);
+    EXPECT_DOUBLE_EQ(entity.cubes[2].size.z, 3.0);
+
+    EXPECT_DOUBLE_EQ(entity.cubes[3].pose.position.x, 0.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[3].pose.position.y, 7.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[3].pose.position.z, 0.5);
+    EXPECT_DOUBLE_EQ(entity.cubes[3].size.x, 24.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[3].size.y, 0.02);
+    EXPECT_DOUBLE_EQ(entity.cubes[3].size.z, 3.0);
+
+    for (const auto& wall : entity.cubes) {
+        EXPECT_DOUBLE_EQ(wall.pose.orientation.w, 1.0);
+        EXPECT_DOUBLE_EQ(wall.color.r, 1.0);
+        EXPECT_DOUBLE_EQ(wall.color.g, 0.1);
+        EXPECT_DOUBLE_EQ(wall.color.b, 0.1);
+        EXPECT_DOUBLE_EQ(wall.color.a, 0.25);
+    }
+}
+
+TEST(WorldBoundaryWalls, EmptyEnvDeletesWallsEntity) {
+    const auto hidden = worldWallsSceneUpdate(parseWorldBoundaryDisplay(""), ros::Time(1, 0), "world");
+    ASSERT_EQ(hidden.deletions.size(), 1U);
+    EXPECT_EQ(hidden.deletions[0].type, foxglove_msgs::SceneEntityDeletion::MATCHING_ID);
+    EXPECT_EQ(hidden.deletions[0].id, kWorldBoundaryWallsEntityId);
+    EXPECT_TRUE(hidden.entities.empty());
+}
+
+TEST(WorldBoundaryWalls, TopicsAreDistinctFromBoundaryAndScene) {
+    EXPECT_STREQ(kWorldBoundaryWallsTopic, "/xgc/world_boundary_walls");
+    EXPECT_STREQ(kWorldBoundaryWallsArTopic, "/xgc/world_boundary_walls_ar");
+    EXPECT_STRNE(kWorldBoundaryWallsTopic, kWorldBoundaryWallsArTopic);
+    EXPECT_STRNE(kWorldBoundaryWallsTopic, kWorldBoundaryTopic);
+    EXPECT_STRNE(kWorldBoundaryWallsTopic, kWorldBoundaryArTopic);
+    EXPECT_STRNE(kWorldBoundaryWallsArTopic, kWorldBoundaryArTopic);
+    EXPECT_STRNE(kWorldBoundaryWallsTopic, kIdentityArTopic);
+    EXPECT_STRNE(kWorldBoundaryWallsTopic, "/xgc/scene");
 }
 
 TEST(ArIdentity, ImagePaneUsesOffsetVrpnAndIgnoresFusedLocal) {

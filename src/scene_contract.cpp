@@ -12,6 +12,7 @@
 #include <utility>
 
 #include <foxglove_msgs/Color.h>
+#include <foxglove_msgs/CubePrimitive.h>
 #include <foxglove_msgs/LinePrimitive.h>
 #include <foxglove_msgs/ModelPrimitive.h>
 #include <foxglove_msgs/SceneEntity.h>
@@ -314,6 +315,8 @@ WorldBoundaryDisplay parseWorldBoundaryDisplay(const std::string& json) {
             !(result.x_min < result.x_max) || !(result.y_min < result.y_max) || !(z_min < z_max)) {
             throw std::invalid_argument("XGC2_WORLD_BOUNDARY controlBounds requires min < max on each axis");
         }
+        result.z_min = z_min;
+        result.z_max = z_max;
         has_bounds = true;
     }
     double ground_z = 0.0;
@@ -339,12 +342,12 @@ foxglove_msgs::SceneEntity worldBoundaryEntity(const WorldBoundaryDisplay& bound
     foxglove_msgs::LinePrimitive loop;
     loop.type = foxglove_msgs::LinePrimitive::LINE_LOOP;
     loop.pose.orientation.w = 1.0;
-    loop.thickness = 0.03;
+    loop.thickness = 0.06;
     loop.scale_invariant = false;
-    loop.color.r = 0.45;
-    loop.color.g = 0.45;
-    loop.color.b = 0.45;
-    loop.color.a = 0.85;
+    loop.color.r = 1.0;
+    loop.color.g = 0.2;
+    loop.color.b = 0.15;
+    loop.color.a = 1.0;
     const double corners[4][2] = {
         {boundary.x_min, boundary.y_min},
         {boundary.x_max, boundary.y_min},
@@ -380,6 +383,76 @@ foxglove_msgs::SceneUpdate worldBoundarySceneUpdate(const WorldBoundaryDisplay& 
         update.entities.push_back(worldBoundaryEntity(boundary, stamp, frame_id));
     } else {
         update.deletions.push_back(worldBoundaryDeletion(stamp));
+    }
+    return update;
+}
+
+foxglove_msgs::SceneEntity worldWallsEntity(const WorldBoundaryDisplay& boundary, const ros::Time& stamp,
+                                            const std::string& frame_id) {
+    if (!boundary.displayable || stamp.isZero() || !isWorldFixedFrame(frame_id)) {
+        throw std::invalid_argument("world walls display requires configured bounds, world frame, and timestamp");
+    }
+    foxglove_msgs::SceneEntity entity;
+    entity.id = kWorldBoundaryWallsEntityId;
+    entity.frame_id = frame_id;
+    entity.timestamp = stamp;
+
+    const double center_x = (boundary.x_min + boundary.x_max) / 2.0;
+    const double center_y = (boundary.y_min + boundary.y_max) / 2.0;
+    const double center_z = (boundary.z_min + boundary.z_max) / 2.0;
+    const double span_x = boundary.x_max - boundary.x_min;
+    const double span_y = boundary.y_max - boundary.y_min;
+    const double span_z = boundary.z_max - boundary.z_min;
+    constexpr double kWallThickness = 0.02;
+
+    struct WallSpec {
+        double center_x;
+        double center_y;
+        double size_x;
+        double size_y;
+    };
+    const WallSpec specs[4] = {
+        {boundary.x_min, center_y, kWallThickness, span_y},
+        {boundary.x_max, center_y, kWallThickness, span_y},
+        {center_x, boundary.y_min, span_x, kWallThickness},
+        {center_x, boundary.y_max, span_x, kWallThickness},
+    };
+    for (const auto& spec : specs) {
+        foxglove_msgs::CubePrimitive wall;
+        wall.pose.orientation.w = 1.0;
+        wall.pose.position.x = spec.center_x;
+        wall.pose.position.y = spec.center_y;
+        wall.pose.position.z = center_z;
+        wall.size.x = spec.size_x;
+        wall.size.y = spec.size_y;
+        wall.size.z = span_z;
+        wall.color.r = 1.0;
+        wall.color.g = 0.1;
+        wall.color.b = 0.1;
+        wall.color.a = 0.25;
+        entity.cubes.push_back(std::move(wall));
+    }
+    return entity;
+}
+
+foxglove_msgs::SceneEntityDeletion worldWallsDeletion(const ros::Time& stamp) {
+    if (stamp.isZero()) {
+        throw std::invalid_argument("world walls deletion requires a timestamp");
+    }
+    foxglove_msgs::SceneEntityDeletion deletion;
+    deletion.timestamp = stamp;
+    deletion.type = foxglove_msgs::SceneEntityDeletion::MATCHING_ID;
+    deletion.id = kWorldBoundaryWallsEntityId;
+    return deletion;
+}
+
+foxglove_msgs::SceneUpdate worldWallsSceneUpdate(const WorldBoundaryDisplay& boundary, const ros::Time& stamp,
+                                                 const std::string& frame_id) {
+    foxglove_msgs::SceneUpdate update;
+    if (boundary.displayable) {
+        update.entities.push_back(worldWallsEntity(boundary, stamp, frame_id));
+    } else {
+        update.deletions.push_back(worldWallsDeletion(stamp));
     }
     return update;
 }

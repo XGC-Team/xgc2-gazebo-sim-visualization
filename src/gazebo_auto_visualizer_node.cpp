@@ -255,6 +255,12 @@ class GazeboAutoVisualizer {
             world_boundary_ar_pub_ = nh_.advertise<foxglove_msgs::SceneUpdate>(
                 gazebo_sim_visualization::kWorldBoundaryArTopic, 1, true);
             publishSceneReset(world_boundary_ar_pub_);
+            world_boundary_walls_pub_ = nh_.advertise<foxglove_msgs::SceneUpdate>(
+                gazebo_sim_visualization::kWorldBoundaryWallsTopic, 1, true);
+            publishSceneReset(world_boundary_walls_pub_);
+            world_boundary_walls_ar_pub_ = nh_.advertise<foxglove_msgs::SceneUpdate>(
+                gazebo_sim_visualization::kWorldBoundaryWallsArTopic, 1, true);
+            publishSceneReset(world_boundary_walls_ar_pub_);
             publishWorldBoundaryLatch();
         }
         joint_transform_cadence_.reset(new gazebo_sim_visualization::PublishCadence(joint_transform_publish_rate_));
@@ -851,6 +857,10 @@ class GazeboAutoVisualizer {
             gazebo_sim_visualization::worldBoundarySceneUpdate(boundary, stamp, frame_id_);
         world_boundary_pub_.publish(update);
         world_boundary_ar_pub_.publish(update);
+        const foxglove_msgs::SceneUpdate walls_update =
+            gazebo_sim_visualization::worldWallsSceneUpdate(boundary, stamp, frame_id_);
+        world_boundary_walls_pub_.publish(walls_update);
+        world_boundary_walls_ar_pub_.publish(walls_update);
     }
 
     void publishCallback(const ros::TimerEvent&) {
@@ -997,6 +1007,8 @@ class GazeboAutoVisualizer {
     std::map<std::string, foxglove_msgs::SceneEntity> ar_identity_entities_;
     ros::Publisher world_boundary_pub_;
     ros::Publisher world_boundary_ar_pub_;
+    ros::Publisher world_boundary_walls_pub_;
+    ros::Publisher world_boundary_walls_ar_pub_;
     ros::Publisher scene_ready_pub_;
     ros::Timer publish_timer_;
     ros::Timer pose_transform_timer_;
