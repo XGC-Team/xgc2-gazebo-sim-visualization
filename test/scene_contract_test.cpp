@@ -892,31 +892,31 @@ TEST(WorldBoundaryWalls, DisplayableBoundsBuildFourTranslucentRedWalls) {
 
     EXPECT_DOUBLE_EQ(entity.cubes[0].pose.position.x, -12.0);
     EXPECT_DOUBLE_EQ(entity.cubes[0].pose.position.y, 0.0);
-    EXPECT_DOUBLE_EQ(entity.cubes[0].pose.position.z, 0.5);
+    EXPECT_DOUBLE_EQ(entity.cubes[0].pose.position.z, 1.09);
     EXPECT_DOUBLE_EQ(entity.cubes[0].size.x, 0.02);
     EXPECT_DOUBLE_EQ(entity.cubes[0].size.y, 14.0);
-    EXPECT_DOUBLE_EQ(entity.cubes[0].size.z, 3.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[0].size.z, 1.82);
 
     EXPECT_DOUBLE_EQ(entity.cubes[1].pose.position.x, 12.0);
     EXPECT_DOUBLE_EQ(entity.cubes[1].pose.position.y, 0.0);
-    EXPECT_DOUBLE_EQ(entity.cubes[1].pose.position.z, 0.5);
+    EXPECT_DOUBLE_EQ(entity.cubes[1].pose.position.z, 1.09);
     EXPECT_DOUBLE_EQ(entity.cubes[1].size.x, 0.02);
     EXPECT_DOUBLE_EQ(entity.cubes[1].size.y, 14.0);
-    EXPECT_DOUBLE_EQ(entity.cubes[1].size.z, 3.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[1].size.z, 1.82);
 
     EXPECT_DOUBLE_EQ(entity.cubes[2].pose.position.x, 0.0);
     EXPECT_DOUBLE_EQ(entity.cubes[2].pose.position.y, -7.0);
-    EXPECT_DOUBLE_EQ(entity.cubes[2].pose.position.z, 0.5);
+    EXPECT_DOUBLE_EQ(entity.cubes[2].pose.position.z, 1.09);
     EXPECT_DOUBLE_EQ(entity.cubes[2].size.x, 24.0);
     EXPECT_DOUBLE_EQ(entity.cubes[2].size.y, 0.02);
-    EXPECT_DOUBLE_EQ(entity.cubes[2].size.z, 3.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[2].size.z, 1.82);
 
     EXPECT_DOUBLE_EQ(entity.cubes[3].pose.position.x, 0.0);
     EXPECT_DOUBLE_EQ(entity.cubes[3].pose.position.y, 7.0);
-    EXPECT_DOUBLE_EQ(entity.cubes[3].pose.position.z, 0.5);
+    EXPECT_DOUBLE_EQ(entity.cubes[3].pose.position.z, 1.09);
     EXPECT_DOUBLE_EQ(entity.cubes[3].size.x, 24.0);
     EXPECT_DOUBLE_EQ(entity.cubes[3].size.y, 0.02);
-    EXPECT_DOUBLE_EQ(entity.cubes[3].size.z, 3.0);
+    EXPECT_DOUBLE_EQ(entity.cubes[3].size.z, 1.82);
 
     for (const auto& wall : entity.cubes) {
         EXPECT_DOUBLE_EQ(wall.pose.orientation.w, 1.0);
@@ -924,6 +924,60 @@ TEST(WorldBoundaryWalls, DisplayableBoundsBuildFourTranslucentRedWalls) {
         EXPECT_DOUBLE_EQ(wall.color.g, 0.1);
         EXPECT_DOUBLE_EQ(wall.color.b, 0.1);
         EXPECT_DOUBLE_EQ(wall.color.a, 0.25);
+    }
+}
+
+TEST(WorldBoundaryWalls, ScoutWallsClipBelowGroundWithoutChangingControlBounds) {
+    const auto boundary = parseWorldBoundaryDisplay(
+        R"({"schemaVersion":1,"frameId":"world","unit":"m","controlBounds":{"xMin":-12,"xMax":12,"yMin":-7,"yMax":7,"zMin":-1,"zMax":1},"groundZ":0})");
+    const auto entity = worldWallsEntity(boundary, ros::Time(1, 0), "world");
+    ASSERT_EQ(entity.cubes.size(), 4U);
+    for (const auto& wall : entity.cubes) {
+        EXPECT_DOUBLE_EQ(wall.pose.position.z - wall.size.z / 2.0, 0.0);
+        EXPECT_DOUBLE_EQ(wall.pose.position.z + wall.size.z / 2.0, 1.0);
+    }
+    EXPECT_DOUBLE_EQ(boundary.z_min, -1.0);
+    EXPECT_DOUBLE_EQ(boundary.z_max, 1.0);
+    EXPECT_DOUBLE_EQ(boundary.ground_z, 0.0);
+}
+
+TEST(WorldBoundaryWalls, PositiveLowerBoundStaysAboveGround) {
+    const auto boundary = parseWorldBoundaryDisplay(
+        R"({"schemaVersion":1,"frameId":"world","unit":"m","controlBounds":{"xMin":-6.9,"xMax":6.9,"yMin":-4.4,"yMax":4.4,"zMin":0.2,"zMax":2.8},"groundZ":0})");
+    const auto entity = worldWallsEntity(boundary, ros::Time(1, 0), "world");
+    ASSERT_EQ(entity.cubes.size(), 4U);
+    for (const auto& wall : entity.cubes) {
+        EXPECT_NEAR(wall.pose.position.z - wall.size.z / 2.0, 0.2, 1.0e-12);
+        EXPECT_NEAR(wall.pose.position.z + wall.size.z / 2.0, 2.8, 1.0e-12);
+    }
+}
+
+TEST(WorldBoundaryWalls, RaisedGroundClipsAtItsWorldHeight) {
+    const auto boundary = parseWorldBoundaryDisplay(
+        R"({"schemaVersion":1,"frameId":"world","unit":"m","controlBounds":{"xMin":-12,"xMax":12,"yMin":-7,"yMax":7,"zMin":-1,"zMax":2},"groundZ":0.75})");
+    const auto entity = worldWallsEntity(boundary, ros::Time(1, 0), "world");
+    ASSERT_EQ(entity.cubes.size(), 4U);
+    for (const auto& wall : entity.cubes) {
+        EXPECT_DOUBLE_EQ(wall.pose.position.z - wall.size.z / 2.0, 0.75);
+        EXPECT_DOUBLE_EQ(wall.pose.position.z + wall.size.z / 2.0, 2.0);
+    }
+}
+
+TEST(WorldBoundaryWalls, GroundAtOrAboveCeilingReplacesWallsWithEmptyEntity) {
+    auto boundary = parseWorldBoundaryDisplay(
+        R"({"schemaVersion":1,"frameId":"world","unit":"m","controlBounds":{"xMin":-12,"xMax":12,"yMin":-7,"yMax":7,"zMin":-1,"zMax":1},"groundZ":0})");
+    const auto visible = worldWallsSceneUpdate(boundary, ros::Time(1, 0), "world");
+    ASSERT_EQ(visible.entities.size(), 1U);
+    ASSERT_EQ(visible.entities[0].cubes.size(), 4U);
+    for (const double ground_z : {1.0, 2.0}) {
+        boundary.ground_z = ground_z;
+        const auto hidden = worldWallsSceneUpdate(boundary, ros::Time(2, 0), "world");
+        ASSERT_EQ(hidden.entities.size(), 1U);
+        EXPECT_EQ(hidden.entities[0].id, visible.entities[0].id);
+        EXPECT_EQ(hidden.entities[0].frame_id, "world");
+        EXPECT_EQ(hidden.entities[0].timestamp, ros::Time(2, 0));
+        EXPECT_TRUE(hidden.entities[0].cubes.empty());
+        EXPECT_TRUE(hidden.deletions.empty());
     }
 }
 

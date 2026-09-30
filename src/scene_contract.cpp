@@ -397,12 +397,18 @@ foxglove_msgs::SceneEntity worldWallsEntity(const WorldBoundaryDisplay& boundary
     entity.frame_id = frame_id;
     entity.timestamp = stamp;
 
+    // Clip the display at the ground plane without changing the control bounds.
+    const double wall_bottom = std::max(boundary.z_min, boundary.ground_z);
+    if (boundary.z_max <= wall_bottom) {
+        return entity;  // Same-ID replacement clears any previously visible walls.
+    }
+
     const double center_x = (boundary.x_min + boundary.x_max) / 2.0;
     const double center_y = (boundary.y_min + boundary.y_max) / 2.0;
-    const double center_z = (boundary.z_min + boundary.z_max) / 2.0;
+    const double center_z = (wall_bottom + boundary.z_max) / 2.0;
     const double span_x = boundary.x_max - boundary.x_min;
     const double span_y = boundary.y_max - boundary.y_min;
-    const double span_z = boundary.z_max - boundary.z_min;
+    const double span_z = boundary.z_max - wall_bottom;
     constexpr double kWallThickness = 0.02;
 
     struct WallSpec {
