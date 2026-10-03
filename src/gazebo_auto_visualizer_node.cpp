@@ -675,12 +675,13 @@ class GazeboAutoVisualizer {
                     view, model.canonical_pose, model.ar_pose, now, canonical_pose_timeout_sec_);
             auto existing = entities->find(model.name);
             if (pose.found) {
+                if (existing != entities->end() && existing->second.timestamp == pose.stamp) {
+                    continue;
+                }
                 foxglove_msgs::SceneEntity entity = gazebo_sim_visualization::uavHeightProjectionEntity(
                     model.name, pose.pose.position, pose.stamp, frame_id_, model.height_projection_color);
-                if (existing == entities->end() || existing->second.timestamp != entity.timestamp) {
-                    (*entities)[model.name] = entity;
-                    changed = true;
-                }
+                (*entities)[model.name] = std::move(entity);
+                changed = true;
             } else if (existing != entities->end()) {
                 update.deletions.push_back(
                     gazebo_sim_visualization::uavHeightProjectionDeletion(model.name, now));
