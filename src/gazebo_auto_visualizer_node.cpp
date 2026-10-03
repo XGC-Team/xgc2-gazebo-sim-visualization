@@ -878,8 +878,14 @@ class GazeboAutoVisualizer {
             return;
         }
 
+        const bool mesh_markers = publish_markers_;
+        const bool path_markers = publish_markers_ || (publish_scene_paths_ && scene_decision.publish_path);
+        const bool label_markers = publish_markers_ || scene_decision.publish_label;
         visualization_msgs::MarkerArray markers;
         std::vector<geometry_msgs::TransformStamped> transforms;
+        visualization_msgs::MarkerArray* marker_output =
+            (mesh_markers || path_markers || label_markers) ? &markers : nullptr;
+        std::vector<geometry_msgs::TransformStamped>* transform_output = publish_transforms_ ? &transforms : nullptr;
         foxglove_msgs::SceneUpdate scene_update;
         std::size_t world_pose_count = 0U;
         for (auto& entry : models_) {
@@ -899,13 +905,16 @@ class GazeboAutoVisualizer {
                 state.rotors_active = rotorsActive(model, now);
                 state.rotor_speed_rad_s = rotorSpeedFor(model, now);
                 state.stamp = now;
-                uav_visualizer_->append(state, &markers, &transforms);
+                uav_visualizer_->append(state, marker_output, transform_output, mesh_markers, path_markers, label_markers);
             } else if (model.kind == gazebo_sim_visualization::RobotModelKind::kMecanum) {
-                mecanum_visualizer_->append(makeMecanumVisualState(model, *pose, now), &markers, &transforms);
+                mecanum_visualizer_->append(makeMecanumVisualState(model, *pose, now), marker_output, transform_output,
+                                            mesh_markers, path_markers, label_markers);
             } else {
-                ugv_visualizer_->append(makeUgvVisualState(model, *pose, now), &markers, &transforms);
+                ugv_visualizer_->append(makeUgvVisualState(model, *pose, now), marker_output, transform_output,
+                                       mesh_markers, path_markers, label_markers);
             }
-            gazebo_sim_visualization::applyRobotMarkerLabel(&markers, first_marker, model.kind, model.ros_namespace);
+            if (marker_output != nullptr)
+                gazebo_sim_visualization::applyRobotMarkerLabel(marker_output, first_marker, model.kind, model.ros_namespace);
             if (publish_scene_paths_ && scene_decision.publish_path) {
                 gazebo_sim_visualization::appendSceneEntityPart(
                     model.kind, model.slot_name, gazebo_sim_visualization::SceneEntityPart::kPath, markers,
