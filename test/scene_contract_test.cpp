@@ -688,6 +688,79 @@ TEST(FrozenVisualizationRosterReady, AllowsMissingSiblingPoses) {
     EXPECT_FALSE(frozenVisualizationRosterReady(4U, 5U));
 }
 
+TEST(FsPartitionDisplayPose, FrozenIdentityAndGenerationPreserveOriginalPhysicsNumbers) {
+    xgc2_lightweight_sim_msgs::NamedPose record;
+    record.body = "uav7";
+    record.robot_index = 0;
+    record.generation = 1;
+    record.validity = 1;
+    record.provider_enabled = false;
+    record.header.stamp = ros::Time(10, 0);
+    record.header.frame_id = "map";
+    record.pose.position.x = -4.0;
+    record.pose.position.y = 2.5;
+    record.pose.position.z = 3.0;
+    record.pose.orientation.w = 1.0;
+    FsDisplayPoseCursor cursor;
+    CanonicalPoseSample sample;
+    ASSERT_TRUE(fsDisplayNamedPoseMatches(record, "uav7", 0));
+    ASSERT_TRUE(applyFsDisplayNamedPose(record, cursor, sample));
+    EXPECT_FALSE(cursor.provider_enabled);
+    const auto selected = selectSlotVisualizationWorldPose(RobotModelKind::kFs150, sample, ros::Time(10, 100000000), 0.5);
+    ASSERT_TRUE(selected.found);
+    EXPECT_DOUBLE_EQ(selected.pose.position.x, -4.0);
+    EXPECT_DOUBLE_EQ(selected.pose.position.y, 2.5);
+    EXPECT_DOUBLE_EQ(selected.pose.position.z, 3.0);
+    EXPECT_EQ(selected.frame_id, "world");
+    EXPECT_EQ(selected.stamp, record.header.stamp);
+    record.header.stamp = ros::Time(11, 0);
+    EXPECT_FALSE(fsDisplayNamedPoseMatches(record, "other", 0));
+    EXPECT_FALSE(fsDisplayNamedPoseMatches(record, "uav7", 1));
+    EXPECT_EQ(sample.stamp, ros::Time(10, 0));
+    record.generation = 0;
+    EXPECT_FALSE(applyFsDisplayNamedPose(record, cursor, sample));
+    record.generation = 2;
+    record.header.stamp = ros::Time(5, 0);
+    record.pose.position.x = 7.0;
+    EXPECT_TRUE(applyFsDisplayNamedPose(record, cursor, sample));
+    EXPECT_EQ(cursor.generation, 2U);
+    EXPECT_EQ(sample.stamp, ros::Time(5, 0));
+    EXPECT_DOUBLE_EQ(sample.pose.position.x, 7.0);
+}
+
+TEST(FsPartitionDisplayPose, SiblingsNeverRefreshEachOtherAndInvalidSourceRetiresItsPose) {
+    xgc2_lightweight_sim_msgs::NamedPose record;
+    record.body = "uav1";
+    record.validity = 1;
+    record.header.stamp = ros::Time(10, 0);
+    record.header.frame_id = "map";
+    record.pose.orientation.w = 1.0;
+    FsDisplayPoseCursor a, b;
+    CanonicalPoseSample pose_a, pose_b;
+    ASSERT_TRUE(applyFsDisplayNamedPose(record, a, pose_a));
+    record.body = "uav2";
+    record.robot_index = 1;
+    record.header.stamp = ros::Time(11, 0);
+    ASSERT_TRUE(applyFsDisplayNamedPose(record, b, pose_b));
+    EXPECT_FALSE(selectSlotVisualizationWorldPose(RobotModelKind::kFs150, pose_a, ros::Time(11, 100000000), 0.5).found);
+    EXPECT_TRUE(selectSlotVisualizationWorldPose(RobotModelKind::kFs150, pose_b, ros::Time(11, 100000000), 0.5).found);
+    EXPECT_FALSE(applyFsDisplayNamedPose(record, b, pose_b));
+    record.validity = 0;
+    ASSERT_TRUE(applyFsDisplayNamedPose(record, b, pose_b));
+    EXPECT_FALSE(pose_b.available);
+    record.validity = 1;
+    EXPECT_FALSE(applyFsDisplayNamedPose(record, b, pose_b));
+    record.header.stamp = ros::Time(12, 0);
+    ASSERT_TRUE(applyFsDisplayNamedPose(record, b, pose_b));
+    record.header.stamp = ros::Time(11, 0);
+    EXPECT_FALSE(applyFsDisplayNamedPose(record, b, pose_b));
+    record.header.stamp = ros::Time(13, 0);
+    record.pose.position.x = std::numeric_limits<double>::infinity();
+    ASSERT_TRUE(applyFsDisplayNamedPose(record, b, pose_b));
+    EXPECT_FALSE(pose_b.available);
+    EXPECT_EQ(pose_a.stamp, ros::Time(10, 0));
+}
+
 TEST(UavHeightProjection, UsesWorldVerticalAndHollowGroundRingAtEveryHeight) {
     geometry_msgs::Point position;
     position.x = 4.5;

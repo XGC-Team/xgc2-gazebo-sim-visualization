@@ -84,7 +84,7 @@ Section: misc
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: XGC2 <apt@example.com>
-Depends: libgazebo11, ros-noetic-foxglove-msgs, ros-noetic-geometry-msgs, ros-noetic-mavros-msgs, ros-noetic-robot-state-publisher, ros-noetic-roscpp, ros-noetic-roslaunch, ros-noetic-rviz, ros-noetic-std-msgs, ros-noetic-tf2-ros, ros-noetic-visualization-msgs, ros-noetic-xgc2-robot-visualization (>= 0.2.0-16)
+Depends: libgazebo11, ros-noetic-foxglove-msgs, ros-noetic-geometry-msgs, ros-noetic-mavros-msgs, ros-noetic-robot-state-publisher, ros-noetic-roscpp, ros-noetic-roslaunch, ros-noetic-rviz, ros-noetic-std-msgs, ros-noetic-tf2-ros, ros-noetic-visualization-msgs, ros-noetic-xgc2-lightweight-sim-msgs (>= 0.3.0-2), ros-noetic-xgc2-robot-visualization (>= 0.2.0-16)
 Description: XGC2 Gazebo Classic RViz and Lichtblick visualization tools
 EOF
 
