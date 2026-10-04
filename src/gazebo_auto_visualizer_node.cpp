@@ -8,6 +8,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -273,16 +274,28 @@ class GazeboAutoVisualizer {
             if (transform_topic_ != "/tf") {
                 tf_tree_pub_ = nh_.advertise<tf2_msgs::TFMessage>("/tf", 10, false);
             }
-            // Latch world→map (algorithm Path frame_id=map) and world→xgc_origin
-            // (Fixed Frame identity) on /tf_static. Lichtblick scene-class 3D
-            // does not subscribe to plant /tf; these identities are product-owned.
+            // Latch world→map (algorithm Path frame_id=map), world→xgc_origin
+            // (Fixed Frame identity) and the constant FS150 camera frames on
+            // /tf_static. Lichtblick scene-class 3D does not subscribe to plant
+            // /tf; these transforms are product-owned. A latched topic keeps
+            // only its last message, so the whole static set is one message,
+            // published once the tracked model set is final (it is fixed above).
+            // The camera frames never change, so they are not part of the
+            // joint cadence on transform_topic_.
             tf_static_pub_ = nh_.advertise<tf2_msgs::TFMessage>("/tf_static", 1, true);
-            tf2_msgs::TFMessage overlay;
-            overlay.transforms.push_back(
-                gazebo_sim_visualization::algorithmOverlayFrameAlias(frame_id_, ros::Time(0)));
-            overlay.transforms.push_back(
-                gazebo_sim_visualization::worldFixedFrameRoot(frame_id_, ros::Time(0)));
-            tf_static_pub_.publish(overlay);
+            std::vector<std::string> fs150_scene_models;
+            for (const auto& entry : models_) {
+                if (entry.second.kind == gazebo_sim_visualization::RobotModelKind::kFs150) {
+                    fs150_scene_models.push_back(entry.second.name);
+                }
+            }
+            tf2_msgs::TFMessage static_transforms;
+            static_transforms.transforms =
+                gazebo_sim_visualization::visualizationStaticTransforms(frame_id_, fs150_scene_models);
+            for (const geometry_msgs::TransformStamped& transform : static_transforms.transforms) {
+                static_transform_children_.insert(transform.child_frame_id);
+            }
+            tf_static_pub_.publish(static_transforms);
             pose_transform_timer_ = nh_.createTimer(
                 ros::Duration(1.0 / pose_transform_publish_rate_),
                 &GazeboAutoVisualizer::publishPoseTransformsCallback, this);
@@ -306,8 +319,7 @@ class GazeboAutoVisualizer {
         gazebo_sim_visualization::CanonicalPoseSample canonical_pose;
         gazebo_sim_visualization::CanonicalPoseSample ar_pose;
         std::array<double, 3> world_offset{{0.0, 0.0, 0.0}};
-        ros::Time last_pose_transform_stamp;
-        ros::Time last_ar_label_transform_stamp;
+        gazebo_sim_visualization::PoseTransformCursor pose_cursor;
         bool height_projection_enabled{false};
         foxglove_msgs::Color height_projection_color;
         bool has_mavros_state{false};
@@ -588,21 +600,11 @@ class GazeboAutoVisualizer {
         tf2_msgs::TFMessage message;
         for (auto& entry : models_) {
             TrackedModel& model = entry.second;
-            const gazebo_sim_visualization::CanonicalWorldPose pose = selectWorldPose(model, now);
-            if (pose.found && pose.stamp != model.last_pose_transform_stamp) {
-                const auto transforms = gazebo_sim_visualization::canonicalRobotPoseTransforms(
-                    model.kind, model.name, pose.pose, pose.stamp, frame_id_, scene_label_offsets_);
-                message.transforms.insert(message.transforms.end(), transforms.begin(), transforms.end());
-                model.last_pose_transform_stamp = pose.stamp;
-            }
-            const gazebo_sim_visualization::CanonicalWorldPose ar_pose =
-                gazebo_sim_visualization::selectArIdentityWorldPose(
-                    model.kind, model.canonical_pose, model.ar_pose, now, canonical_pose_timeout_sec_);
-            if (ar_pose.found && ar_pose.stamp != model.last_ar_label_transform_stamp) {
-                message.transforms.push_back(gazebo_sim_visualization::canonicalArIdentityLabelTransform(
-                    model.kind, model.name, ar_pose.pose, ar_pose.stamp, frame_id_, scene_label_offsets_));
-                model.last_ar_label_transform_stamp = ar_pose.stamp;
-            }
+            // A source sample is examined only when its stamp is new; the
+            // stamp guard runs before selection, never after.
+            gazebo_sim_visualization::appendPoseTransformsForTick(
+                model.kind, model.name, model.canonical_pose, model.ar_pose, now, canonical_pose_timeout_sec_,
+                frame_id_, scene_label_offsets_, &model.pose_cursor, &message.transforms, nullptr);
         }
         if (message.transforms.empty()) {
             return;
@@ -950,12 +952,12 @@ class GazeboAutoVisualizer {
                 if (!tf_tree_pub_) {
                     outgoing.push_back(root);
                 }
-                for (const geometry_msgs::TransformStamped& transform : transforms) {
+                if (publish_joints) {
                     // Body and upright label-anchor transforms follow each
-                    // canonical pose callback. The timer owns only child joints.
-                    if (publish_joints && transform.header.frame_id != frame_id_) {
-                        outgoing.push_back(transform);
-                    }
+                    // canonical pose callback. The timer owns only the child
+                    // joints that move; constant frames are latched on /tf_static.
+                    gazebo_sim_visualization::appendDynamicJointTransforms(transforms, frame_id_,
+                                                                           static_transform_children_, &outgoing);
                 }
                 if (!outgoing.empty()) {
                     tf2_msgs::TFMessage message;
@@ -1033,6 +1035,7 @@ class GazeboAutoVisualizer {
     ros::Publisher transform_pub_;
     ros::Publisher tf_tree_pub_;
     ros::Publisher tf_static_pub_;
+    std::unordered_set<std::string> static_transform_children_;
     std::string transform_topic_;
     std::map<std::string, TrackedModel> models_;
     std::map<std::string, PathPublisherRuntime> path_publishers_;

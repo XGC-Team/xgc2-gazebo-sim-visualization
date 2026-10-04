@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <regex>
 #include <sstream>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -24,6 +25,7 @@
 #include <std_msgs/ColorRGBA.h>
 #include <visualization_msgs/Marker.h>
 
+#include "xgc2_robot_visualization/fs150_uav_visualizer.hpp"
 #include "xgc2_robot_visualization/path_history.hpp"
 #include "xgc2_robot_visualization/robot_frames.hpp"
 
@@ -949,6 +951,122 @@ geometry_msgs::TransformStamped algorithmOverlayFrameAlias(const std::string& wo
 
 bool frozenVisualizationRosterReady(std::size_t tracked_models, std::size_t world_poses) {
     return tracked_models > 0U && world_poses <= tracked_models;
+}
+
+std::vector<geometry_msgs::TransformStamped> fs150StaticTransforms(const std::string& scene_model,
+                                                                   const std::string& frame_id) {
+    if (!canonicalROSIdentifier(scene_model) || !isWorldFixedFrame(frame_id)) {
+        throw std::invalid_argument("FS150 static transforms need a canonical scene model and the world Fixed Frame");
+    }
+    // The constants are read from the visualizer that owns them rather than
+    // restated here. A scratch instance keeps its rotor/path state out of the
+    // live one; the pose is irrelevant because these frames are body-relative.
+    xgc2_robot_visualization::Fs150UavVisualizer::Config config;
+    config.frame_id = frame_id;
+    xgc2_robot_visualization::Fs150UavVisualizer scratch(config);
+    xgc2_robot_visualization::UavVisualState state;
+    state.name = scene_model;
+    state.pose.orientation.w = 1.0;
+    state.stamp = ros::Time(1, 0);
+    std::vector<geometry_msgs::TransformStamped> produced;
+    scratch.append(state, nullptr, &produced, false, false, false);
+
+    const std::string prefix = xgc2_robot_visualization::robotFramePrefix(scene_model);
+    const std::string camera_link = prefix + "/camera_link";
+    const std::string optical_frame = prefix + "/camera_optical_frame";
+    std::vector<geometry_msgs::TransformStamped> constants;
+    for (const geometry_msgs::TransformStamped& transform : produced) {
+        if (transform.child_frame_id == camera_link || transform.child_frame_id == optical_frame) {
+            constants.push_back(transform);
+            constants.back().header.stamp = ros::Time(0);
+        }
+    }
+    if (constants.size() != 2U) {
+        throw std::logic_error("the FS150 visualizer no longer produces exactly the camera link and optical frame");
+    }
+    return constants;
+}
+
+std::vector<geometry_msgs::TransformStamped>
+visualizationStaticTransforms(const std::string& frame_id, const std::vector<std::string>& fs150_scene_models) {
+    std::vector<geometry_msgs::TransformStamped> transforms;
+    transforms.push_back(algorithmOverlayFrameAlias(frame_id, ros::Time(0)));
+    transforms.push_back(worldFixedFrameRoot(frame_id, ros::Time(0)));
+    std::set<std::string> seen;
+    for (const std::string& model : fs150_scene_models) {
+        if (!seen.insert(model).second) {
+            throw std::invalid_argument("FS150 scene model is listed twice for /tf_static: " + model);
+        }
+        const std::vector<geometry_msgs::TransformStamped> constants = fs150StaticTransforms(model, frame_id);
+        transforms.insert(transforms.end(), constants.begin(), constants.end());
+    }
+    return transforms;
+}
+
+void appendDynamicJointTransforms(const std::vector<geometry_msgs::TransformStamped>& produced,
+                                  const std::string& frame_id,
+                                  const std::unordered_set<std::string>& static_children,
+                                  std::vector<geometry_msgs::TransformStamped>* outgoing) {
+    if (outgoing == nullptr) {
+        throw std::invalid_argument("dynamic joint transform output is required");
+    }
+    for (const geometry_msgs::TransformStamped& transform : produced) {
+        // Body and upright label-anchor transforms follow each canonical pose
+        // callback. The timer owns only child joints, and of those only the
+        // ones that actually move.
+        if (transform.header.frame_id != frame_id && static_children.count(transform.child_frame_id) == 0U) {
+            outgoing->push_back(transform);
+        }
+    }
+}
+
+const CanonicalPoseSample& arIdentitySourceSample(RobotModelKind kind, const CanonicalPoseSample& canonical,
+                                                  const CanonicalPoseSample& vrpn_already_offset) {
+    return kind == RobotModelKind::kFs150 ? vrpn_already_offset : canonical;
+}
+
+void appendPoseTransformsForTick(RobotModelKind kind, const std::string& scene_model,
+                                 const CanonicalPoseSample& canonical, const CanonicalPoseSample& vrpn_already_offset,
+                                 const ros::Time& now, double timeout_sec, const std::string& frame_id,
+                                 const SceneLabelOffsets& offsets, PoseTransformCursor* cursor,
+                                 std::vector<geometry_msgs::TransformStamped>* out, PoseTransformWork* work) {
+    if (cursor == nullptr || out == nullptr) {
+        throw std::invalid_argument("pose transform cursor and output are required");
+    }
+    // A selected pose carries the stamp of its source sample, so a source stamp
+    // equal to the emitted one can neither produce a new transform (fresh) nor
+    // change what was emitted (stale). Neither selection nor construction runs.
+    if (canonical.stamp != cursor->pose_stamp) {
+        if (work != nullptr) {
+            ++work->selections;
+        }
+        const CanonicalWorldPose pose = selectSlotVisualizationWorldPose(kind, canonical, now, timeout_sec);
+        if (pose.found) {
+            if (work != nullptr) {
+                ++work->constructions;
+            }
+            const std::vector<geometry_msgs::TransformStamped> transforms =
+                canonicalRobotPoseTransforms(kind, scene_model, pose.pose, pose.stamp, frame_id, offsets);
+            out->insert(out->end(), transforms.begin(), transforms.end());
+            cursor->pose_stamp = pose.stamp;
+        }
+    }
+    const CanonicalPoseSample& ar_source = arIdentitySourceSample(kind, canonical, vrpn_already_offset);
+    if (ar_source.stamp != cursor->ar_label_stamp) {
+        if (work != nullptr) {
+            ++work->selections;
+        }
+        const CanonicalWorldPose ar_pose =
+            selectArIdentityWorldPose(kind, canonical, vrpn_already_offset, now, timeout_sec);
+        if (ar_pose.found) {
+            if (work != nullptr) {
+                ++work->constructions;
+            }
+            out->push_back(canonicalArIdentityLabelTransform(kind, scene_model, ar_pose.pose, ar_pose.stamp, frame_id,
+                                                              offsets));
+            cursor->ar_label_stamp = ar_pose.stamp;
+        }
+    }
 }
 
 } // namespace gazebo_sim_visualization

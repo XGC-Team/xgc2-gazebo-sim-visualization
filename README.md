@@ -70,6 +70,17 @@ separate rendering paths and separate entity identities. Robot meshes stay in
 the robot's own URDF, placed from `/xgc/tf`; this node does not republish those
 meshes into the scene.
 
+Transform topics carry two kinds of facts. Body and label-anchor transforms
+follow each canonical pose sample on `transform_topic` (default `/xgc/tf`), and
+rotor/wheel joints follow at `joint_transform_publish_rate`. Frames that never
+change are latched once on `/tf_static` instead: `world -> map`,
+`world -> xgc_origin`, and, for every tracked FS150, `camera_link` (child of
+the body frame) and `camera_optical_frame` (child of `camera_link`). A latched
+topic keeps only its last message, so this node publishes the complete static
+set as one message after the tracked model set is known. A pose-transform tick
+examines a source sample only when its stamp is new; every new sample still
+produces its transforms.
+
 XGC starts this mode with typed model lists derived from the experiment run's
 immutable Robot snapshot:
 

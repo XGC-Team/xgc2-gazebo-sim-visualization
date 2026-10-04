@@ -1,13 +1,17 @@
 #include "gazebo_sim_visualization/scene_contract.hpp"
+#include "xgc2_robot_visualization/fs150_uav_visualizer.hpp"
 #include "xgc2_robot_visualization/path_history.hpp"
 #include "xgc2_robot_visualization/robot_frames.hpp"
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 #include <foxglove_msgs/LinePrimitive.h>
 #include <geometry_msgs/Pose.h>
@@ -1087,6 +1091,343 @@ TEST(ArIdentity, LabelArFrameIsUprightSeparateFromFusedLabel) {
 TEST(ArIdentity, SceneArTopicIsNotTheFusedScene) {
     EXPECT_STREQ(kIdentityArTopic, "/xgc/scene_ar");
     EXPECT_STRNE(kIdentityArTopic, "/xgc/scene");
+}
+
+// ---- constant FS150 frames on /tf_static ------------------------------------
+
+const geometry_msgs::TransformStamped* findChild(const std::vector<geometry_msgs::TransformStamped>& transforms,
+                                                 const std::string& child) {
+    for (const geometry_msgs::TransformStamped& transform : transforms) {
+        if (transform.child_frame_id == child) {
+            return &transform;
+        }
+    }
+    return nullptr;
+}
+
+bool sameTransform(const geometry_msgs::TransformStamped& a, const geometry_msgs::TransformStamped& b) {
+    return a.header.stamp == b.header.stamp && a.header.frame_id == b.header.frame_id &&
+           a.child_frame_id == b.child_frame_id && a.transform.translation.x == b.transform.translation.x &&
+           a.transform.translation.y == b.transform.translation.y &&
+           a.transform.translation.z == b.transform.translation.z &&
+           a.transform.rotation.x == b.transform.rotation.x && a.transform.rotation.y == b.transform.rotation.y &&
+           a.transform.rotation.z == b.transform.rotation.z && a.transform.rotation.w == b.transform.rotation.w;
+}
+
+bool sameTransforms(const std::vector<geometry_msgs::TransformStamped>& a,
+                    const std::vector<geometry_msgs::TransformStamped>& b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < a.size(); ++index) {
+        if (!sameTransform(a[index], b[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Everything one live FS150 visualizer tick produces for a pose.
+std::vector<geometry_msgs::TransformStamped> liveJointTick(xgc2_robot_visualization::Fs150UavVisualizer* live,
+                                                           const std::string& name, double x, double z, double yaw,
+                                                           const ros::Time& stamp) {
+    xgc2_robot_visualization::UavVisualState state;
+    state.name = name;
+    state.pose.position.x = x;
+    state.pose.position.z = z;
+    state.pose.orientation.z = std::sin(0.5 * yaw);
+    state.pose.orientation.w = std::cos(0.5 * yaw);
+    state.rotors_active = true;
+    state.rotor_speed_rad_s = 90.0;
+    state.stamp = stamp;
+    std::vector<geometry_msgs::TransformStamped> transforms;
+    live->append(state, nullptr, &transforms, false, false, false);
+    return transforms;
+}
+
+TEST(StaticFrames, Fs150CameraFramesAreExactlyTheConstantsOfTheLiveVisualizer) {
+    const std::string prefix = xgc2_robot_visualization::robotFramePrefix("uav3");
+    const std::vector<geometry_msgs::TransformStamped> statics = fs150StaticTransforms("uav3", "world");
+    ASSERT_EQ(statics.size(), 2U);
+    EXPECT_EQ(statics[0].header.frame_id, prefix + "/base_link");
+    EXPECT_EQ(statics[0].child_frame_id, prefix + "/camera_link");
+    EXPECT_EQ(statics[1].header.frame_id, prefix + "/camera_link");
+    EXPECT_EQ(statics[1].child_frame_id, prefix + "/camera_optical_frame");
+    EXPECT_TRUE(statics[0].header.stamp.isZero());
+    EXPECT_TRUE(statics[1].header.stamp.isZero());
+
+    // The two frames must not depend on pose, attitude, time or rotor phase:
+    // two very different live ticks reproduce them bit for bit, while at least
+    // one rotor joint moves between the same two ticks.
+    xgc2_robot_visualization::Fs150UavVisualizer::Config config;
+    config.frame_id = "world";
+    xgc2_robot_visualization::Fs150UavVisualizer live(config);
+    const auto first = liveJointTick(&live, "uav3", 4.0, 0.2, 0.0, ros::Time(10, 0));
+    const auto second = liveJointTick(&live, "uav3", -1.5, 2.5, 1.1, ros::Time(10, 500000000));
+    for (const geometry_msgs::TransformStamped& constant : statics) {
+        for (const auto* tick : {&first, &second}) {
+            const geometry_msgs::TransformStamped* found = findChild(*tick, constant.child_frame_id);
+            ASSERT_TRUE(found != nullptr) << constant.child_frame_id;
+            EXPECT_EQ(found->header.frame_id, constant.header.frame_id);
+            EXPECT_EQ(found->transform.translation.x, constant.transform.translation.x);
+            EXPECT_EQ(found->transform.translation.y, constant.transform.translation.y);
+            EXPECT_EQ(found->transform.translation.z, constant.transform.translation.z);
+            EXPECT_EQ(found->transform.rotation.x, constant.transform.rotation.x);
+            EXPECT_EQ(found->transform.rotation.y, constant.transform.rotation.y);
+            EXPECT_EQ(found->transform.rotation.z, constant.transform.rotation.z);
+            EXPECT_EQ(found->transform.rotation.w, constant.transform.rotation.w);
+        }
+    }
+    bool rotor_moved = false;
+    for (const geometry_msgs::TransformStamped& before : first) {
+        if (before.header.frame_id != prefix + "/base_link" || before.child_frame_id == statics[0].child_frame_id) {
+            continue;
+        }
+        const geometry_msgs::TransformStamped* after = findChild(second, before.child_frame_id);
+        ASSERT_TRUE(after != nullptr);
+        rotor_moved = rotor_moved || before.transform.rotation.z != after->transform.rotation.z ||
+                      before.transform.rotation.w != after->transform.rotation.w;
+    }
+    EXPECT_TRUE(rotor_moved);
+}
+
+TEST(StaticFrames, LatchedSetIsOneMessageWithTheOverlayRootAndEveryFs150Camera) {
+    const std::vector<geometry_msgs::TransformStamped> set = visualizationStaticTransforms("world", {"uav1", "uav2"});
+    ASSERT_EQ(set.size(), 2U + 2U * 2U);
+    EXPECT_TRUE(sameTransform(set[0], algorithmOverlayFrameAlias("world", ros::Time(0))));
+    EXPECT_TRUE(sameTransform(set[1], worldFixedFrameRoot("world", ros::Time(0))));
+    std::set<std::string> children;
+    for (const geometry_msgs::TransformStamped& transform : set) {
+        EXPECT_TRUE(transform.header.stamp.isZero());
+        children.insert(transform.child_frame_id);
+    }
+    EXPECT_EQ(children.size(), set.size());
+    for (const std::string& model : {std::string("uav1"), std::string("uav2")}) {
+        const std::string prefix = xgc2_robot_visualization::robotFramePrefix(model);
+        EXPECT_TRUE(children.count(prefix + "/camera_link"));
+        EXPECT_TRUE(children.count(prefix + "/camera_optical_frame"));
+    }
+
+    // Without an FS150 the latched message is exactly the pre-existing overlay.
+    const std::vector<geometry_msgs::TransformStamped> legacy = visualizationStaticTransforms("world", {});
+    ASSERT_EQ(legacy.size(), 2U);
+    EXPECT_TRUE(sameTransform(legacy[0], set[0]));
+    EXPECT_TRUE(sameTransform(legacy[1], set[1]));
+
+    EXPECT_THROW(visualizationStaticTransforms("world", {"uav1", "uav1"}), std::invalid_argument);
+    EXPECT_THROW(visualizationStaticTransforms("odom", {"uav1"}), std::invalid_argument);
+    EXPECT_THROW(fs150StaticTransforms("bad-name", "world"), std::invalid_argument);
+}
+
+TEST(StaticFrames, DynamicJointCadenceNoLongerCarriesTheConstantCameraFrames) {
+    xgc2_robot_visualization::Fs150UavVisualizer::Config config;
+    config.frame_id = "world";
+    xgc2_robot_visualization::Fs150UavVisualizer live(config);
+    const std::vector<geometry_msgs::TransformStamped> produced =
+        liveJointTick(&live, "uav1", 1.0, 0.5, 0.3, ros::Time(20, 0));
+    const std::string prefix = xgc2_robot_visualization::robotFramePrefix("uav1");
+
+    std::unordered_set<std::string> static_children;
+    for (const geometry_msgs::TransformStamped& transform : visualizationStaticTransforms("world", {"uav1"})) {
+        static_children.insert(transform.child_frame_id);
+    }
+    std::vector<geometry_msgs::TransformStamped> dynamic;
+    appendDynamicJointTransforms(produced, "world", static_children, &dynamic);
+
+    // Before the change the timer sent every non-world-parent transform.
+    std::vector<geometry_msgs::TransformStamped> before_change;
+    appendDynamicJointTransforms(produced, "world", {}, &before_change);
+    ASSERT_TRUE(findChild(before_change, prefix + "/camera_link") != nullptr);
+    ASSERT_TRUE(findChild(before_change, prefix + "/camera_optical_frame") != nullptr);
+
+    EXPECT_EQ(dynamic.size() + 2U, before_change.size());
+    EXPECT_FALSE(dynamic.empty());
+    EXPECT_TRUE(findChild(dynamic, prefix + "/camera_link") == nullptr);
+    EXPECT_TRUE(findChild(dynamic, prefix + "/camera_optical_frame") == nullptr);
+    // Body and label anchor have the Fixed Frame as parent and stay with the
+    // pose callbacks; every remaining joint is a moving child of the body.
+    EXPECT_TRUE(findChild(dynamic, prefix + "/base_link") == nullptr);
+    for (const geometry_msgs::TransformStamped& transform : dynamic) {
+        EXPECT_EQ(transform.header.frame_id, prefix + "/base_link");
+    }
+    EXPECT_THROW(appendDynamicJointTransforms(produced, "world", static_children, nullptr), std::invalid_argument);
+}
+
+// ---- pose transform timer: stamp guard ahead of selection -------------------
+
+CanonicalPoseSample poseSample(double x, const ros::Time& stamp, const std::string& frame_id) {
+    CanonicalPoseSample sample;
+    sample.available = true;
+    sample.pose.position.x = x;
+    sample.pose.position.y = 0.5 * x;
+    sample.pose.position.z = 1.0;
+    sample.pose.orientation.w = 1.0;
+    sample.stamp = stamp;
+    sample.frame_id = frame_id;
+    return sample;
+}
+
+struct LegacyCursor {
+    ros::Time pose_stamp;
+    ros::Time ar_label_stamp;
+};
+
+// The loop body of the pose transform timer before the guard moved: select
+// first, then compare the stamp. Kept as the behavioral oracle and as the
+// selection counter the new function must undercut.
+void legacyTick(RobotModelKind kind, const std::string& name, const CanonicalPoseSample& canonical,
+                const CanonicalPoseSample& ar, const ros::Time& now, double timeout, LegacyCursor* cursor,
+                std::vector<geometry_msgs::TransformStamped>* out, std::size_t* selections) {
+    ++*selections;
+    const CanonicalWorldPose pose = selectSlotVisualizationWorldPose(kind, canonical, now, timeout);
+    if (pose.found && pose.stamp != cursor->pose_stamp) {
+        const auto transforms = canonicalRobotPoseTransforms(kind, name, pose.pose, pose.stamp, "world", {});
+        out->insert(out->end(), transforms.begin(), transforms.end());
+        cursor->pose_stamp = pose.stamp;
+    }
+    ++*selections;
+    const CanonicalWorldPose ar_pose = selectArIdentityWorldPose(kind, canonical, ar, now, timeout);
+    if (ar_pose.found && ar_pose.stamp != cursor->ar_label_stamp) {
+        out->push_back(canonicalArIdentityLabelTransform(kind, name, ar_pose.pose, ar_pose.stamp, "world", {}));
+        cursor->ar_label_stamp = ar_pose.stamp;
+    }
+}
+
+TEST(PoseTransformTick, ArIdentitySourceIsVrpnForFs150AndTheCanonicalPoseOtherwise) {
+    const CanonicalPoseSample canonical = poseSample(1.0, ros::Time(5, 0), "world");
+    const CanonicalPoseSample vrpn = poseSample(2.0, ros::Time(6, 0), "world");
+    EXPECT_EQ(&arIdentitySourceSample(RobotModelKind::kFs150, canonical, vrpn), &vrpn);
+    EXPECT_EQ(&arIdentitySourceSample(RobotModelKind::kScout, canonical, vrpn), &canonical);
+    EXPECT_EQ(&arIdentitySourceSample(RobotModelKind::kMecanum, canonical, vrpn), &canonical);
+}
+
+TEST(PoseTransformTick, UnchangedSourceStampsAreNeitherSelectedNorConstructedAgain) {
+    const double timeout = 0.5;
+    const CanonicalPoseSample canonical = poseSample(1.0, ros::Time(100, 0), "map");
+    const CanonicalPoseSample vrpn = poseSample(1.0, ros::Time(100, 10000000), "world");
+    PoseTransformCursor cursor;
+    PoseTransformWork work;
+    LegacyCursor legacy_cursor;
+    std::size_t legacy_selections = 0;
+    std::vector<geometry_msgs::TransformStamped> legacy;
+
+    std::vector<geometry_msgs::TransformStamped> first;
+    appendPoseTransformsForTick(RobotModelKind::kFs150, "uav1", canonical, vrpn, ros::Time(100, 20000000), timeout,
+                                "world", {}, &cursor, &first, &work);
+    legacyTick(RobotModelKind::kFs150, "uav1", canonical, vrpn, ros::Time(100, 20000000), timeout, &legacy_cursor,
+               &legacy, &legacy_selections);
+    // New samples produce body, label anchor and AR label anchor, exactly as before.
+    EXPECT_EQ(first.size(), 3U);
+    EXPECT_TRUE(sameTransforms(first, legacy));
+    EXPECT_EQ(work.selections, 2U);
+    EXPECT_EQ(work.constructions, 2U);
+
+    // 120 Hz ticks against the same 100 Hz sample, fresh and then stale.
+    for (int tick = 1; tick <= 12; ++tick) {
+        const ros::Time now = ros::Time(100, 20000000) + ros::Duration(0.1 * tick);
+        std::vector<geometry_msgs::TransformStamped> repeat;
+        appendPoseTransformsForTick(RobotModelKind::kFs150, "uav1", canonical, vrpn, now, timeout, "world", {},
+                                    &cursor, &repeat, &work);
+        std::vector<geometry_msgs::TransformStamped> legacy_repeat;
+        legacyTick(RobotModelKind::kFs150, "uav1", canonical, vrpn, now, timeout, &legacy_cursor, &legacy_repeat,
+                   &legacy_selections);
+        EXPECT_TRUE(repeat.empty());
+        EXPECT_TRUE(legacy_repeat.empty());
+    }
+    EXPECT_EQ(work.selections, 2U);
+    EXPECT_EQ(work.constructions, 2U);
+    // The pre-change loop paid two selections on every one of the 13 ticks.
+    EXPECT_EQ(legacy_selections, 26U);
+    EXPECT_EQ(cursor.pose_stamp, legacy_cursor.pose_stamp);
+    EXPECT_EQ(cursor.ar_label_stamp, legacy_cursor.ar_label_stamp);
+
+    // The next source sample is not suppressed.
+    const CanonicalPoseSample next = poseSample(1.1, ros::Time(101, 0), "map");
+    std::vector<geometry_msgs::TransformStamped> after;
+    appendPoseTransformsForTick(RobotModelKind::kFs150, "uav1", next, vrpn, ros::Time(101, 5000000), timeout, "world",
+                                {}, &cursor, &after, &work);
+    ASSERT_EQ(after.size(), 2U);
+    EXPECT_EQ(after[0].header.stamp, ros::Time(101, 0));
+    EXPECT_EQ(work.constructions, 3U);
+}
+
+TEST(PoseTransformTick, StaleSampleWithANewStampIsStillHandledAsBefore) {
+    const double timeout = 0.5;
+    PoseTransformCursor cursor;
+    PoseTransformWork work;
+    const CanonicalPoseSample stale = poseSample(1.0, ros::Time(100, 0), "map");
+    const CanonicalPoseSample vrpn = poseSample(1.0, ros::Time(100, 0), "world");
+    std::vector<geometry_msgs::TransformStamped> out;
+    // The sample is two seconds old on arrival: nothing is emitted, and it is
+    // re-examined while its stamp has not been emitted.
+    appendPoseTransformsForTick(RobotModelKind::kFs150, "uav1", stale, vrpn, ros::Time(102, 0), timeout, "world", {},
+                                &cursor, &out, &work);
+    appendPoseTransformsForTick(RobotModelKind::kFs150, "uav1", stale, vrpn, ros::Time(102, 8000000), timeout, "world",
+                                {}, &cursor, &out, &work);
+    EXPECT_TRUE(out.empty());
+    EXPECT_TRUE(cursor.pose_stamp.isZero());
+    EXPECT_TRUE(cursor.ar_label_stamp.isZero());
+    EXPECT_EQ(work.selections, 4U);
+    EXPECT_EQ(work.constructions, 0U);
+
+    const CanonicalPoseSample fresh = poseSample(2.0, ros::Time(102, 10000000), "map");
+    const CanonicalPoseSample fresh_vrpn = poseSample(2.0, ros::Time(102, 10000000), "world");
+    appendPoseTransformsForTick(RobotModelKind::kFs150, "uav1", fresh, fresh_vrpn, ros::Time(102, 16000000), timeout,
+                                "world", {}, &cursor, &out, &work);
+    EXPECT_EQ(out.size(), 3U);
+    EXPECT_EQ(cursor.pose_stamp, ros::Time(102, 10000000));
+}
+
+TEST(PoseTransformTick, MatchesTheSelectThenGuardLoopOnEverySourceSequence) {
+    const double timeout = 0.5;
+    const std::array<std::string, 4> frames = {{"map", "world", "/world", "odom"}};
+    for (const RobotModelKind kind : {RobotModelKind::kFs150, RobotModelKind::kScout, RobotModelKind::kMecanum}) {
+        const std::string name = kind == RobotModelKind::kFs150 ? "uav1" : "ugv1";
+        std::uint32_t seed = 12345U + static_cast<std::uint32_t>(kind);
+        const auto next = [&seed]() {
+            seed = seed * 1664525U + 1013904223U;
+            return seed >> 8;
+        };
+        CanonicalPoseSample canonical;
+        CanonicalPoseSample ar;
+        PoseTransformCursor cursor;
+        PoseTransformWork work;
+        LegacyCursor legacy_cursor;
+        std::size_t legacy_selections = 0;
+        ros::Time now(100, 0);
+        std::size_t emitted = 0;
+        for (int tick = 0; tick < 2000; ++tick) {
+            now = now + ros::Duration(0.002 * static_cast<double>(next() % 8U));
+            if (next() % 10U < 6U) {
+                canonical.available = next() % 16U != 0U;
+                if (next() % 7U != 0U) {
+                    canonical.stamp = now - ros::Duration(0.001 * static_cast<double>(next() % 900U));
+                }
+                canonical.frame_id = frames[next() % frames.size()];
+                canonical.pose.position.x = 0.01 * tick;
+                canonical.pose.orientation.w = 1.0;
+            }
+            if (next() % 10U < 5U) {
+                ar.available = next() % 16U != 0U;
+                if (next() % 7U != 0U) {
+                    ar.stamp = now - ros::Duration(0.001 * static_cast<double>(next() % 900U));
+                }
+                ar.frame_id = frames[next() % frames.size()];
+                ar.pose.position.y = 0.01 * tick;
+                ar.pose.orientation.w = 1.0;
+            }
+            std::vector<geometry_msgs::TransformStamped> actual;
+            appendPoseTransformsForTick(kind, name, canonical, ar, now, timeout, "world", {}, &cursor, &actual, &work);
+            std::vector<geometry_msgs::TransformStamped> expected;
+            legacyTick(kind, name, canonical, ar, now, timeout, &legacy_cursor, &expected, &legacy_selections);
+            ASSERT_TRUE(sameTransforms(actual, expected)) << "tick " << tick << " kind " << static_cast<int>(kind);
+            ASSERT_EQ(cursor.pose_stamp, legacy_cursor.pose_stamp) << "tick " << tick;
+            ASSERT_EQ(cursor.ar_label_stamp, legacy_cursor.ar_label_stamp) << "tick " << tick;
+            emitted += actual.size();
+        }
+        EXPECT_GT(emitted, 100U);
+        EXPECT_LT(work.selections, legacy_selections);
+    }
 }
 
 } // namespace
