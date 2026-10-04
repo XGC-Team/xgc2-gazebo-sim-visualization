@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <foxglove_msgs/Color.h>
@@ -265,6 +266,62 @@ geometry_msgs::TransformStamped worldFixedFrameRoot(const std::string& frame_id,
 // consuming plant /tf. It is not a robot body transform.
 constexpr const char* kAlgorithmOverlayFrame = "map";
 geometry_msgs::TransformStamped algorithmOverlayFrameAlias(const std::string& world_frame, const ros::Time& stamp);
+
+// Constant FS150 frames. The onboard camera is rigidly mounted: `camera_link`
+// is a fixed child of the body frame and `camera_optical_frame` a fixed child
+// of `camera_link`. Their transforms never depend on pose, time or flight
+// state, so they are sent once on latched /tf_static instead of at the joint
+// cadence on the high-rate transform topic. The values come from the same
+// visualizer that used to stream them; rotor joints are not constant and are
+// not returned. Stamps are zero, the static-transform convention.
+std::vector<geometry_msgs::TransformStamped> fs150StaticTransforms(const std::string& scene_model,
+                                                                   const std::string& frame_id);
+
+// The complete latched /tf_static content of this node: the world->map overlay
+// alias, the world->xgc_origin identity and the constant frames of every FS150
+// scene model. A latched topic retains only its last message, so every static
+// transform must travel in one message, published after the tracked set is
+// known. Duplicate models are rejected.
+std::vector<geometry_msgs::TransformStamped>
+visualizationStaticTransforms(const std::string& frame_id, const std::vector<std::string>& fs150_scene_models);
+
+// One timer tick's dynamic joint transforms: the visualizer's non-body
+// transforms (parent other than the Fixed Frame), minus any child frame that is
+// published on /tf_static. Order is preserved.
+void appendDynamicJointTransforms(const std::vector<geometry_msgs::TransformStamped>& produced,
+                                  const std::string& frame_id,
+                                  const std::unordered_set<std::string>& static_children,
+                                  std::vector<geometry_msgs::TransformStamped>* outgoing);
+
+// Source stamps whose pose transforms were already emitted for one model.
+struct PoseTransformCursor {
+    ros::Time pose_stamp;
+    ros::Time ar_label_stamp;
+};
+
+// Optional work counters. A caller that does not measure passes nullptr.
+struct PoseTransformWork {
+    std::size_t selections{0};
+    std::size_t constructions{0};
+};
+
+// The sample the Image-pane identity label follows: VRPN for FS150, the
+// canonical slot pose for ground robots (see selectArIdentityWorldPose).
+const CanonicalPoseSample& arIdentitySourceSample(RobotModelKind kind, const CanonicalPoseSample& canonical,
+                                                  const CanonicalPoseSample& vrpn_already_offset);
+
+// One pose-transform timer tick for one model: body and label anchor for a new
+// canonical sample, and the AR label anchor for a new AR sample. A sample
+// whose stamp was already emitted yields nothing whether it is still fresh or
+// has gone stale, so it is neither selected nor constructed again; this is the
+// stamp guard moved ahead of the selection. Every new source sample still
+// produces its transforms, and a stale sample with a new stamp is handled
+// exactly as before. Appends to *out and advances *cursor only for what it emits.
+void appendPoseTransformsForTick(RobotModelKind kind, const std::string& scene_model,
+                                 const CanonicalPoseSample& canonical, const CanonicalPoseSample& vrpn_already_offset,
+                                 const ros::Time& now, double timeout_sec, const std::string& frame_id,
+                                 const SceneLabelOffsets& offsets, PoseTransformCursor* cursor,
+                                 std::vector<geometry_msgs::TransformStamped>* out, PoseTransformWork* work);
 
 // Runtime readiness is "the frozen roster is configured and this node can
 // publish". Physical runs often have no VRPN, no camera, and only a subset of
