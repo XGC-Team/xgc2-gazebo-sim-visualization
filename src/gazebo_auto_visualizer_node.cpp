@@ -418,9 +418,11 @@ class GazeboAutoVisualizer {
             const std::string topic =
                 gazebo_sim_visualization::slotVisualizationPoseTopic(model.kind, model.ros_namespace);
             model.pose_subscriber = nh_.subscribe<geometry_msgs::PoseStamped>(
-                topic, 10, [this, scene_model = model.name](const geometry_msgs::PoseStampedConstPtr& msg) {
+                topic, 10,
+                [this, scene_model = model.name](const geometry_msgs::PoseStampedConstPtr& msg) {
                     canonicalPoseCallback(scene_model, msg);
-                });
+                },
+                ros::VoidConstPtr(), ros::TransportHints().tcpNoDelay());
             ROS_INFO("[gazebo_auto_visualizer] Viewer pose for scene model '%s' slot '%s' is %s",
                      model.name.c_str(), model.slot_name.c_str(), topic.c_str());
         }
