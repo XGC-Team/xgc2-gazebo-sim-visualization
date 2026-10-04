@@ -68,6 +68,14 @@ foxglove_msgs::SceneEntity uavHeightProjectionEntity(
     const std::string& scene_model, const geometry_msgs::Point& position,
     const ros::Time& stamp, const std::string& frame_id, const foxglove_msgs::Color& color);
 
+// Reuse an entity created by uavHeightProjectionEntity. Coordinates are assigned
+// from the absolute world position, while primitive/point/index storage stays owned
+// by that entity. Identity, frame, color and stamp retain the constructor's semantics.
+void updateUavHeightProjectionEntity(
+    foxglove_msgs::SceneEntity& entity, const std::string& scene_model,
+    const geometry_msgs::Point& position, const ros::Time& stamp,
+    const std::string& frame_id, const foxglove_msgs::Color& color);
+
 foxglove_msgs::SceneEntityDeletion uavHeightProjectionDeletion(const std::string& scene_model,
                                                                const ros::Time& stamp);
 

@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -749,6 +750,102 @@ TEST(UavHeightProjection, UsesWorldVerticalAndHollowGroundRingAtEveryHeight) {
     EXPECT_THROW(uavHeightProjectionEntity("uav5", position, ros::Time(42, 0), "uav5/base_link", color), std::invalid_argument);
     position.z = std::numeric_limits<double>::infinity();
     EXPECT_THROW(uavHeightProjectionEntity("uav5", position, ros::Time(42, 0), "world", color), std::invalid_argument);
+}
+
+TEST(UavHeightProjection, UpdatesAbsoluteGeometryWithStableStorage) {
+    geometry_msgs::Point position;
+    position.x = 4.5;
+    position.y = -2.0;
+    position.z = 3.0;
+    auto entity = uavHeightProjectionEntity("uav5", position, ros::Time(42, 0), "world",
+                                          sceneColorFromHex("#123abc"));
+    const auto* lines = entity.lines.data();
+    const auto* line_points = entity.lines[0].points.data();
+    const auto* triangles = entity.triangles.data();
+    const auto* ring_points = entity.triangles[0].points.data();
+    const auto* indices = entity.triangles[0].indices.data();
+    const auto original_indices = entity.triangles[0].indices;
+    const auto point_capacity = entity.triangles[0].points.capacity();
+    const auto index_capacity = entity.triangles[0].indices.capacity();
+    const double inputs[][3] = {{-5.25, 7.0, -0.5}, {1.0e12, -1.0e12, 100.0},
+                               {1.0e-8, -3.0e-9, 0.0}, {-5.25, 7.0, -0.5}, {-5.25, 7.0, -0.5}};
+    for (std::size_t step = 0; step < 5U; ++step) {
+        position.x = inputs[step][0];
+        position.y = inputs[step][1];
+        position.z = inputs[step][2];
+        const std::string model = step % 2 == 0 ? "uav5" : "uav6";
+        const std::string frame = step % 2 == 0 ? "world" : "/world";
+        auto color = sceneColorFromHex(step % 2 == 0 ? "#123abc" : "#abcdef");
+        color.a = 0.25 + 0.1 * step;
+        const ros::Time stamp(43 + step, 0);
+        updateUavHeightProjectionEntity(entity, model, position, stamp, frame, color);
+        EXPECT_EQ(entity.id, model + "/height_projection");
+        EXPECT_EQ(entity.frame_id, frame);
+        EXPECT_EQ(entity.timestamp, stamp);
+        EXPECT_EQ(entity.lines.data(), lines);
+        EXPECT_EQ(entity.lines[0].points.data(), line_points);
+        EXPECT_EQ(entity.triangles.data(), triangles);
+        EXPECT_EQ(entity.triangles[0].points.data(), ring_points);
+        EXPECT_EQ(entity.triangles[0].indices.data(), indices);
+        EXPECT_EQ(entity.triangles[0].points.capacity(), point_capacity);
+        EXPECT_EQ(entity.triangles[0].indices.capacity(), index_capacity);
+        EXPECT_EQ(entity.triangles[0].indices, original_indices);
+        EXPECT_DOUBLE_EQ(entity.lines[0].points[0].z, position.z);
+        EXPECT_DOUBLE_EQ(entity.lines[0].points[1].z, 0.0);
+        for (const auto& point : entity.lines[0].points) {
+            EXPECT_DOUBLE_EQ(point.x, position.x);
+            EXPECT_DOUBLE_EQ(point.y, position.y);
+        }
+        for (std::size_t i = 0; i < 96U; ++i) {
+            const double angle = 2.0 * std::acos(-1.0) * static_cast<double>(i / 2) / 48;
+            const double radius = i % 2 == 0 ? 0.18 : 0.13;
+            const auto& point = entity.triangles[0].points[i];
+            EXPECT_DOUBLE_EQ(point.x, position.x + radius * std::cos(angle));
+            EXPECT_DOUBLE_EQ(point.y, position.y + radius * std::sin(angle));
+            EXPECT_DOUBLE_EQ(point.z, 0.0);
+        }
+        EXPECT_DOUBLE_EQ(entity.lines[0].color.r, color.r);
+        EXPECT_DOUBLE_EQ(entity.lines[0].color.a, color.a);
+        EXPECT_DOUBLE_EQ(entity.triangles[0].color.r, color.r);
+        EXPECT_DOUBLE_EQ(entity.triangles[0].color.a, color.a);
+        EXPECT_DOUBLE_EQ(entity.lines[0].pose.orientation.w, 1.0);
+        EXPECT_DOUBLE_EQ(entity.triangles[0].pose.orientation.w, 1.0);
+    }
+    const auto valid = entity;
+    position.x = std::numeric_limits<double>::infinity();
+    EXPECT_THROW(updateUavHeightProjectionEntity(entity, "uav5", position, ros::Time(50, 0), "world",
+                                               sceneColorFromHex("#123abc")), std::invalid_argument);
+    EXPECT_EQ(entity.timestamp, valid.timestamp);
+    EXPECT_DOUBLE_EQ(entity.triangles[0].points[0].x, valid.triangles[0].points[0].x);
+}
+
+TEST(UavHeightProjection, PublishedValueCopySurvivesUpdateAndEraseRecreation) {
+    geometry_msgs::Point position;
+    position.x = 4.5;
+    position.y = -2.0;
+    position.z = 3.0;
+    const auto color = sceneColorFromHex("#123abc");
+    std::map<std::string, foxglove_msgs::SceneEntity> entities;
+    entities.emplace("uav5", uavHeightProjectionEntity("uav5", position, ros::Time(42, 0), "world", color));
+    foxglove_msgs::SceneUpdate published;
+    published.entities.push_back(entities.at("uav5"));
+    position.x = -100.0;
+    position.y = 200.0;
+    position.z = -0.5;
+    updateUavHeightProjectionEntity(entities.at("uav5"), "uav5", position, ros::Time(43, 0), "world", color);
+    const auto deletion = uavHeightProjectionDeletion("uav5", ros::Time(44, 0));
+    EXPECT_EQ(deletion.id, published.entities[0].id);
+    EXPECT_EQ(deletion.type, foxglove_msgs::SceneEntityDeletion::MATCHING_ID);
+    entities.erase("uav5");
+    EXPECT_TRUE(entities.empty());
+    entities.emplace("uav5", uavHeightProjectionEntity("uav5", position, ros::Time(45, 0), "world", color));
+    EXPECT_EQ(entities.at("uav5").timestamp, ros::Time(45, 0));
+    EXPECT_DOUBLE_EQ(entities.at("uav5").lines[0].points[0].x, -100.0);
+    EXPECT_DOUBLE_EQ(entities.at("uav5").triangles[0].points[0].x, -100.0 + 0.18);
+    EXPECT_EQ(published.entities[0].timestamp, ros::Time(42, 0));
+    EXPECT_DOUBLE_EQ(published.entities[0].lines[0].points[0].x, 4.5);
+    EXPECT_DOUBLE_EQ(published.entities[0].triangles[0].points[0].x, 4.5 + 0.18);
+    EXPECT_EQ(published.entities[0].triangles[0].indices, entities.at("uav5").triangles[0].indices);
 }
 
 TEST(UavHeightProjection, SplitsLocalPositionAndOffsetVrpnWithoutFallback) {

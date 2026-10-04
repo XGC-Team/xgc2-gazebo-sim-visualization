@@ -166,54 +166,90 @@ SceneLabelStyle sceneLabelStyleFromMarkerColor(const std::string& marker_color,
     return style;
 }
 
-foxglove_msgs::SceneEntity uavHeightProjectionEntity(
-    const std::string& scene_model, const geometry_msgs::Point& position,
-    const ros::Time& stamp, const std::string& frame_id, const foxglove_msgs::Color& color) {
+namespace {
+
+const foxglove_msgs::TriangleListPrimitive& heightProjectionRingTemplate() {
+    static const foxglove_msgs::TriangleListPrimitive ring = [] {
+        foxglove_msgs::TriangleListPrimitive result;
+        result.pose.orientation.w = 1.0;
+        constexpr std::size_t segments = 48;
+        constexpr double outer_radius = 0.18;
+        constexpr double inner_radius = 0.13;
+        const double two_pi = 2.0 * std::acos(-1.0);
+        result.points.reserve(segments * 2);
+        result.indices.reserve(segments * 6);
+        for (std::size_t i = 0; i < segments; ++i) {
+            const double angle = two_pi * static_cast<double>(i) / segments;
+            for (const double radius : {outer_radius, inner_radius}) {
+                geometry_msgs::Point point;
+                point.x = radius * std::cos(angle);
+                point.y = radius * std::sin(angle);
+                result.points.push_back(point);
+            }
+            const auto outer = static_cast<std::uint32_t>(2 * i);
+            const auto next_outer = static_cast<std::uint32_t>(2 * ((i + 1) % segments));
+            result.indices.insert(result.indices.end(), {outer, next_outer, outer + 1,
+                                                        outer + 1, next_outer, next_outer + 1});
+        }
+        return result;
+    }();
+    return ring;
+}
+
+void validateHeightProjectionInput(const std::string& scene_model, const geometry_msgs::Point& position,
+                                   const ros::Time& stamp, const std::string& frame_id) {
     if (!canonicalROSIdentifier(scene_model) || !isWorldFixedFrame(frame_id) || stamp.isZero() ||
         !std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) {
         throw std::invalid_argument("UAV height projection requires a finite world position and identity");
     }
-    foxglove_msgs::SceneEntity entity;
+}
+
+void assignHeightProjectionState(foxglove_msgs::SceneEntity& entity, const std::string& scene_model,
+                                 const geometry_msgs::Point& position, const ros::Time& stamp,
+                                 const std::string& frame_id, const foxglove_msgs::Color& color) {
     entity.id = scene_model + "/height_projection";
     entity.frame_id = frame_id;
     entity.timestamp = stamp;
+    auto& vertical = entity.lines.front();
+    vertical.color = color;
+    vertical.points[0] = position;
+    vertical.points[1] = position;
+    vertical.points[1].z = 0.0;
+    auto& ring = entity.triangles.front();
+    ring.color = color;
+    const auto& offsets = heightProjectionRingTemplate().points;
+    for (std::size_t i = 0; i < offsets.size(); ++i) {
+        ring.points[i].x = position.x + offsets[i].x;
+        ring.points[i].y = position.y + offsets[i].y;
+        ring.points[i].z = 0.0;
+    }
+}
 
-    foxglove_msgs::LinePrimitive vertical;
+} // namespace
+
+foxglove_msgs::SceneEntity uavHeightProjectionEntity(
+    const std::string& scene_model, const geometry_msgs::Point& position,
+    const ros::Time& stamp, const std::string& frame_id, const foxglove_msgs::Color& color) {
+    validateHeightProjectionInput(scene_model, position, stamp, frame_id);
+    foxglove_msgs::SceneEntity entity;
+    entity.lines.resize(1);
+    auto& vertical = entity.lines.front();
     vertical.type = foxglove_msgs::LinePrimitive::LINE_LIST;
     vertical.pose.orientation.w = 1.0;
     vertical.thickness = 0.02;
     vertical.scale_invariant = false;
-    vertical.color = color;
-    vertical.points.push_back(position);
-    geometry_msgs::Point ground = position;
-    ground.z = 0.0;
-    vertical.points.push_back(ground);
-    entity.lines.push_back(std::move(vertical));
-
-    foxglove_msgs::TriangleListPrimitive ring;
-    ring.pose.orientation.w = 1.0;
-    ring.color = color;
-    constexpr std::size_t segments = 48;
-    constexpr double outer_radius = 0.18;
-    constexpr double inner_radius = 0.13;
-    const double two_pi = 2.0 * std::acos(-1.0);
-    ring.points.reserve(segments * 2);
-    ring.indices.reserve(segments * 6);
-    for (std::size_t i = 0; i < segments; ++i) {
-        const double angle = two_pi * static_cast<double>(i) / segments;
-        for (const double radius : {outer_radius, inner_radius}) {
-            geometry_msgs::Point point = ground;
-            point.x += radius * std::cos(angle);
-            point.y += radius * std::sin(angle);
-            ring.points.push_back(point);
-        }
-        const auto outer = static_cast<std::uint32_t>(2 * i);
-        const auto next_outer = static_cast<std::uint32_t>(2 * ((i + 1) % segments));
-        ring.indices.insert(ring.indices.end(), {outer, next_outer, outer + 1,
-                                               outer + 1, next_outer, next_outer + 1});
-    }
-    entity.triangles.push_back(std::move(ring));
+    vertical.points.resize(2);
+    entity.triangles.push_back(heightProjectionRingTemplate());
+    assignHeightProjectionState(entity, scene_model, position, stamp, frame_id, color);
     return entity;
+}
+
+void updateUavHeightProjectionEntity(
+    foxglove_msgs::SceneEntity& entity, const std::string& scene_model,
+    const geometry_msgs::Point& position, const ros::Time& stamp,
+    const std::string& frame_id, const foxglove_msgs::Color& color) {
+    validateHeightProjectionInput(scene_model, position, stamp, frame_id);
+    assignHeightProjectionState(entity, scene_model, position, stamp, frame_id, color);
 }
 
 foxglove_msgs::SceneEntityDeletion uavHeightProjectionDeletion(const std::string& scene_model,

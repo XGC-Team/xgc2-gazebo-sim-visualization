@@ -680,9 +680,14 @@ class GazeboAutoVisualizer {
                 if (existing != entities->end() && existing->second.timestamp == pose.stamp) {
                     continue;
                 }
-                foxglove_msgs::SceneEntity entity = gazebo_sim_visualization::uavHeightProjectionEntity(
-                    model.name, pose.pose.position, pose.stamp, frame_id_, model.height_projection_color);
-                (*entities)[model.name] = std::move(entity);
+                if (existing == entities->end()) {
+                    entities->emplace(model.name, gazebo_sim_visualization::uavHeightProjectionEntity(
+                        model.name, pose.pose.position, pose.stamp, frame_id_, model.height_projection_color));
+                } else {
+                    gazebo_sim_visualization::updateUavHeightProjectionEntity(
+                        existing->second, model.name, pose.pose.position, pose.stamp,
+                        frame_id_, model.height_projection_color);
+                }
                 changed = true;
             } else if (existing != entities->end()) {
                 update.deletions.push_back(
@@ -694,6 +699,8 @@ class GazeboAutoVisualizer {
         if (!changed) {
             return;
         }
+        // Keep the full snapshot value-owned, separate from the entity buffers
+        // updated in place on the next pose; do not borrow them across publish.
         for (const auto& entity : *entities) {
             update.entities.push_back(entity.second);
         }
