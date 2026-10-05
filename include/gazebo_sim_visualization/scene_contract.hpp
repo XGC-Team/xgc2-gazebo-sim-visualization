@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <set>
 #include <string>
 #include <vector>
@@ -16,7 +15,6 @@
 #include <ros/time.h>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
-#include <xgc2_lightweight_sim_msgs/NamedPose.h>
 
 namespace gazebo_sim_visualization {
 
@@ -172,14 +170,13 @@ std::string sceneEntityID(RobotModelKind kind, const std::string& model_name);
 
 std::string sceneEntityPartID(RobotModelKind kind, const std::string& model_name, SceneEntityPart part);
 
-// Legacy per-slot viewer topic for physical/Gazebo FS150 and ground robots.
-// Assigned lightweight pure-sim FS150 bypasses this per-body subscription and
-// uses the Simulation owner's partition physics display pose. Ground robots
-// follow the offset-corrected canonical slot pose.
+// Experiment-slot viewer pose. PX4 deliberately follows MAVROS' fused local
+// estimate so a bad vision/EKF alignment is visible before takeoff; ground
+// robots follow the offset-corrected canonical slot pose.
 std::string slotVisualizationPoseTopic(RobotModelKind kind, const std::string& ros_namespace);
 
 // History `/<slot>/path` sample for the viewer. Scout/Mecanum force world z to
-// 0 so mocap marker height does not float the trail; FS150 keeps its selected source z.
+// 0 so mocap marker height does not float the trail; FS150 keeps fused z.
 // Body TF is pinned the same way; canonical /pose is unchanged.
 geometry_msgs::Pose slotHistoryPathPose(RobotModelKind kind, geometry_msgs::Pose world_pose);
 
@@ -223,10 +220,10 @@ void appendSceneEntityPart(RobotModelKind kind, const std::string& model_name, S
 
 // Body/path poses come only from the one viewer pose selected for the slot.
 // Ground robots arrive in the product Fixed Frame (world ENU z-up). FS150 is
-// selected source may carry `map`: assigned pure-sim physics display pose or
-// the unchanged physical/Gazebo MAVROS fused pose. Numeric ENU coordinates are
-// interpreted in the Experiment world without an additional spawn/offset.
-// There is no source priority or fallback.
+// deliberately different: its selected viewer pose is MAVROS' fused local
+// estimate, whose ROS frame label is `map`; its numeric ENU coordinates are
+// interpreted in the Experiment world so a bad FCU/vision alignment is visible
+// before takeoff. There is no source priority or fallback.
 bool isWorldFixedFrame(const std::string& frame_id);
 
 struct CanonicalPoseSample {
@@ -235,25 +232,6 @@ struct CanonicalPoseSample {
     ros::Time stamp;
     std::string frame_id;
 };
-
-// Per-body display transport cursor. It is not a batch clock or FCU state.
-struct FsDisplayPoseCursor {
-    bool initialized{false};
-    std::uint64_t generation{0};
-    ros::Time last_source_stamp;
-    bool provider_enabled{false};
-};
-
-// Assigned pure-sim FS display follows the Simulation owner's physics pose.
-// Check frozen identity during the one complete-partition validation pass.
-bool fsDisplayNamedPoseMatches(const xgc2_lightweight_sim_msgs::NamedPose& record,
-                               const std::string& frozen_body, std::uint32_t frozen_robot_index);
-
-// Caller has validated the complete partition's identities before mutating state.
-// Apply only this body's generation/stamp/validity. Provider-disabled physicsOnly
-// poses remain usable. No AR offset or armed state.
-bool applyFsDisplayNamedPose(const xgc2_lightweight_sim_msgs::NamedPose& record,
-                             FsDisplayPoseCursor& cursor, CanonicalPoseSample& sample);
 
 struct CanonicalWorldPose {
     bool found{false};
@@ -264,12 +242,12 @@ struct CanonicalWorldPose {
 
 // Accept the kind-specific single viewer pose, or nothing. timeout_sec is a
 // freshness window on that one sample; it does not select a substitute source.
-// FS150 accepts its selected source in `map` (or world for a direct contract test/source);
+// FS150 accepts only MAVROS `map` (or world for a direct contract test/source);
 // ground vehicles continue to require world.
 CanonicalWorldPose selectSlotVisualizationWorldPose(RobotModelKind kind, const CanonicalPoseSample& pose,
                                                      const ros::Time& now, double timeout_sec);
 
-// 3D uses its assigned main pose; AR uses the already-offset VRPN sample. Neither
+// 3D uses fused local_position; AR uses the already-offset VRPN sample. Neither
 // view substitutes the other source when that sample is missing or stale.
 CanonicalWorldPose selectUavHeightProjectionWorldPose(HeightProjectionView view,
                                                     const CanonicalPoseSample& local_position,

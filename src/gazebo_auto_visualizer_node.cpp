@@ -35,7 +35,6 @@
 #include <std_msgs/Empty.h>
 #include <tf2_msgs/TFMessage.h>
 #include <visualization_msgs/MarkerArray.h>
-#include <xgc2_lightweight_sim_msgs/PartitionPoses.h>
 
 namespace {
 
@@ -229,7 +228,6 @@ class GazeboAutoVisualizer {
             ensureTrackedModel(name, gazebo_sim_visualization::RobotModelKind::kMecanum);
         }
         configureFrozenRoster();
-        configureFsDisplayPartitions();
         subscribeCanonicalPoses();
         resubscribeUgvMotionFromSlots();
         scene_ready_pub_ = nh_.advertise<std_msgs::Empty>("/xgc/robot_scene/ready", 1, true);
@@ -299,15 +297,13 @@ class GazeboAutoVisualizer {
         std::string name;
         // Experiment slot identity. Mesh/TF geometry continues to use `name`,
         // the scene-model identity (for example slot uav7 backed by model
-        // ugv1). Assigned pure-sim FS150 uses partition physics pose; unassigned
-        // physical/Gazebo FS150 keeps MAVROS fused pose. Ground robots keep canonical pose.
+        // ugv1). The slot namespace owns the selected pose topic: FS150 uses
+        // MAVROS fused local pose, while ground robots use canonical pose.
         // Visible label class comes from `kind`, not either lowercase ID.
         std::string slot_name;
         std::string ros_namespace;
         gazebo_sim_visualization::RobotModelKind kind;
         gazebo_sim_visualization::CanonicalPoseSample canonical_pose;
-        bool partition_display_pose{false};
-        gazebo_sim_visualization::FsDisplayPoseCursor display_pose_cursor;
         gazebo_sim_visualization::CanonicalPoseSample ar_pose;
         std::array<double, 3> world_offset{{0.0, 0.0, 0.0}};
         ros::Time last_pose_transform_stamp;
@@ -332,19 +328,6 @@ class GazeboAutoVisualizer {
         ros::Subscriber mavros_state_subscriber;
         ros::Subscriber cmd_vel_subscriber;
         ros::Subscriber twist_subscriber;
-    };
-
-    struct FsDisplayBodyBinding {
-        std::string body;
-        // models_ never erases entries; std::map insertions preserve this address.
-        TrackedModel* model{nullptr};
-    };
-
-    struct FsDisplayPartitionRuntime {
-        std::string session_id;
-        std::string partition_id;
-        std::vector<FsDisplayBodyBinding> bodies;
-        ros::Subscriber subscriber;
     };
 
     struct PathPublisherRuntime {
@@ -429,118 +412,9 @@ class GazeboAutoVisualizer {
         }
     }
 
-    void configureFsDisplayPartitions() {
-        XmlRpc::XmlRpcValue assignments;
-        if (!private_nh_.getParam("fs_display_partitions", assignments)) {
-            return; // Physical/Gazebo inputs retain their original binding.
-        }
-        if (assignments.getType() != XmlRpc::XmlRpcValue::TypeArray) {
-            throw std::runtime_error("fs_display_partitions must be a frozen typed array");
-        }
-        const auto text = [](XmlRpc::XmlRpcValue& value, const char* key) -> std::string {
-            if (!value.hasMember(key) || value[key].getType() != XmlRpc::XmlRpcValue::TypeString ||
-                static_cast<std::string>(value[key]).empty()) {
-                throw std::runtime_error(std::string("FS display assignment is missing ") + key);
-            }
-            return static_cast<std::string>(value[key]);
-        };
-        std::set<std::string> assigned_models;
-        std::set<std::pair<std::string, std::string>> partitions;
-        for (int i = 0; i < assignments.size(); ++i) {
-            auto& assignment = assignments[i];
-            if (assignment.getType() != XmlRpc::XmlRpcValue::TypeStruct) {
-                throw std::runtime_error("FS display assignment must be a frozen typed map");
-            }
-            const std::string topic = text(assignment, "topic");
-            FsDisplayPartitionRuntime runtime;
-            runtime.session_id = text(assignment, "session_id");
-            runtime.partition_id = text(assignment, "partition_id");
-            if (!partitions.emplace(runtime.session_id, runtime.partition_id).second ||
-                fs_display_partitions_.count(topic) != 0U || !assignment.hasMember("bodies") ||
-                assignment["bodies"].getType() != XmlRpc::XmlRpcValue::TypeArray) {
-                throw std::runtime_error("FS display partition/topic assignment is repeated or incomplete");
-            }
-            auto& bodies = assignment["bodies"];
-            runtime.bodies.reserve(bodies.size());
-            for (int j = 0; j < bodies.size(); ++j) {
-                auto& body = bodies[j];
-                if (body.getType() != XmlRpc::XmlRpcValue::TypeStruct || !body.hasMember("robot_index") ||
-                    body["robot_index"].getType() != XmlRpc::XmlRpcValue::TypeInt ||
-                    static_cast<int>(body["robot_index"]) < 0) {
-                    throw std::runtime_error("FS display body requires its frozen local robot_index");
-                }
-                FsDisplayBodyBinding binding;
-                binding.body = text(body, "body");
-                const std::string scene_model = text(body, "scene_model");
-                const auto tracked = models_.find(scene_model);
-                const auto index = static_cast<std::uint32_t>(static_cast<int>(body["robot_index"]));
-                if (tracked == models_.end() || tracked->second.kind != gazebo_sim_visualization::RobotModelKind::kFs150 ||
-                    tracked->second.slot_name != binding.body ||
-                    !assigned_models.insert(scene_model).second || index != static_cast<std::uint32_t>(j)) {
-                    throw std::runtime_error("FS display body/index is not an exclusive tracked FS assignment");
-                }
-                binding.model = &tracked->second;
-                runtime.bodies.push_back(std::move(binding));
-                tracked->second.partition_display_pose = true;
-            }
-            auto inserted = fs_display_partitions_.emplace(topic, std::move(runtime));
-            auto* partition = &inserted.first->second;
-            partition->subscriber = nh_.subscribe<xgc2_lightweight_sim_msgs::PartitionPoses>(
-                topic, 1,
-                [this, partition](const xgc2_lightweight_sim_msgs::PartitionPosesConstPtr& message) {
-                    fsDisplayPartitionCallback(*partition, message);
-                }, ros::VoidConstPtr(), ros::TransportHints().tcpNoDelay());
-        }
-    }
-
-    void fsDisplayPartitionCallback(FsDisplayPartitionRuntime& runtime,
-                                    const xgc2_lightweight_sim_msgs::PartitionPosesConstPtr& message) {
-        if (message->session_id != runtime.session_id || message->partition_id != runtime.partition_id ||
-            message->poses.size() != runtime.bodies.size()) {
-            return;
-        }
-        // The producer and frozen manifest both order complete records by local index 0..N-1.
-        // Validate the whole packet before changing any body; no per-frame set or lookup.
-        for (std::size_t i = 0; i < runtime.bodies.size(); ++i) {
-            if (!gazebo_sim_visualization::fsDisplayNamedPoseMatches(
-                    message->poses[i], runtime.bodies[i].body, static_cast<std::uint32_t>(i))) {
-                return;
-            }
-        }
-        // ROS owns the ConstPtr for this callback. Copy only each body's state into
-        // its stable model; there is no deferred consumer needing a retained packet.
-        for (std::size_t i = 0; i < runtime.bodies.size(); ++i) {
-            const auto& record = message->poses[i];
-            auto& model = *runtime.bodies[i].model;
-            const bool new_generation = !model.display_pose_cursor.initialized ||
-                                        record.generation > model.display_pose_cursor.generation;
-            if (!gazebo_sim_visualization::applyFsDisplayNamedPose(
-                    record, model.display_pose_cursor, model.canonical_pose)) {
-                continue;
-            }
-            if (new_generation) {
-                model.last_pose_transform_stamp = ros::Time();
-                auto projection = height_projection_entities_.find(model.name);
-                if (projection != height_projection_entities_.end()) {
-                    // Force replacement, or retain the entity for the original invalid/stale deletion path.
-                    projection->second.timestamp = ros::Time();
-                }
-                auto path = path_publishers_.find(model.name);
-                if (path != path_publishers_.end() && path->second.history) {
-                    path->second.history->reset();
-                    // Reset must replace the old latched generation even without a valid new pose.
-                    path->second.publisher.publish(path->second.history->message());
-                }
-            }
-        }
-    }
-
     void subscribeCanonicalPoses() {
         for (auto& entry : models_) {
             TrackedModel& model = entry.second;
-            if (model.partition_display_pose) {
-                continue; // Retire the assigned FS per-body MAVROS main-display subscription.
-            }
             const std::string topic =
                 gazebo_sim_visualization::slotVisualizationPoseTopic(model.kind, model.ros_namespace);
             model.pose_subscriber = nh_.subscribe<geometry_msgs::PoseStamped>(
@@ -1168,7 +1042,6 @@ class GazeboAutoVisualizer {
     ros::Publisher tf_static_pub_;
     std::string transform_topic_;
     std::map<std::string, TrackedModel> models_;
-    std::map<std::string, FsDisplayPartitionRuntime> fs_display_partitions_;
     std::map<std::string, PathPublisherRuntime> path_publishers_;
     std::map<std::string, PathPublisherRuntime> ar_path_publishers_;
     std::set<std::string> configured_fs150_models_;

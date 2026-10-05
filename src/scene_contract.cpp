@@ -922,58 +922,13 @@ bool isWorldFixedFrame(const std::string& frame_id) {
     return normalizedFrameLabel(frame_id) == "world";
 }
 
-bool fsDisplayNamedPoseMatches(const xgc2_lightweight_sim_msgs::NamedPose& record,
-                               const std::string& frozen_body, std::uint32_t frozen_robot_index) {
-    return record.body == frozen_body && record.robot_index == frozen_robot_index;
-}
-
-bool applyFsDisplayNamedPose(const xgc2_lightweight_sim_msgs::NamedPose& record,
-                             FsDisplayPoseCursor& cursor, CanonicalPoseSample& sample) {
-    if (cursor.initialized && record.generation < cursor.generation) {
-        return false;
-    }
-    const bool new_generation = !cursor.initialized || record.generation > cursor.generation;
-    if (new_generation) {
-        cursor.last_source_stamp = ros::Time();
-        sample = CanonicalPoseSample();
-    } else if (!record.header.stamp.isZero() && record.header.stamp < cursor.last_source_stamp) {
-        return false;
-    }
-    cursor.initialized = true;
-    cursor.generation = record.generation;
-    cursor.provider_enabled = record.provider_enabled;
-    const auto& pose = record.pose;
-    const bool finite = std::isfinite(pose.position.x) && std::isfinite(pose.position.y) &&
-                        std::isfinite(pose.position.z) && std::isfinite(pose.orientation.x) &&
-                        std::isfinite(pose.orientation.y) && std::isfinite(pose.orientation.z) &&
-                        std::isfinite(pose.orientation.w);
-    const bool frame = isWorldFixedFrame(record.header.frame_id) ||
-                       record.header.frame_id == "map" || record.header.frame_id == "/map";
-    if ((record.validity & 1U) == 0U || record.header.stamp.isZero() || !finite || !frame) {
-        sample.available = false;
-        if (record.header.stamp > cursor.last_source_stamp) {
-            cursor.last_source_stamp = record.header.stamp;
-        }
-        return true;
-    }
-    if (!new_generation && record.header.stamp == cursor.last_source_stamp) {
-        return false;
-    }
-    cursor.last_source_stamp = record.header.stamp;
-    sample.available = true;
-    sample.pose = copyPose(pose);
-    sample.stamp = record.header.stamp;
-    sample.frame_id = record.header.frame_id;
-    return true;
-}
-
 CanonicalWorldPose selectSlotVisualizationWorldPose(RobotModelKind kind, const CanonicalPoseSample& pose,
                                                      const ros::Time& now, double timeout_sec) {
     CanonicalWorldPose selected;
-    const bool fs150_map_frame =
+    const bool fs150_fused_local_frame =
         kind == RobotModelKind::kFs150 && (pose.frame_id == "map" || pose.frame_id == "/map");
     if (kind == RobotModelKind::kNone || !isFreshCanonicalSample(pose, now, timeout_sec) ||
-        (!isWorldFixedFrame(pose.frame_id) && !fs150_map_frame)) {
+        (!isWorldFixedFrame(pose.frame_id) && !fs150_fused_local_frame)) {
         return selected;
     }
     selected.found = true;

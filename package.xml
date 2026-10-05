@@ -18,7 +18,6 @@
   <depend>tf2_ros</depend>
   <depend>visualization_msgs</depend>
   <depend>xgc2_robot_visualization</depend>
-  <depend>xgc2_lightweight_sim_msgs</depend>
 
   <exec_depend>roslaunch</exec_depend>
   <exec_depend>rviz</exec_depend>

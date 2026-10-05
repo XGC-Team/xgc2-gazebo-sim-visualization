@@ -59,9 +59,6 @@ docker run --rm \
       fi
     apt-get update
     /workspace/repo/.xgc2/scripts/install_robot_visualization_dependency.sh
-    apt-get install -y --no-install-recommends ros-noetic-xgc2-lightweight-sim-msgs
-    dpkg --compare-versions \
-      "$(dpkg-query -W -f="\${Version}" ros-noetic-xgc2-lightweight-sim-msgs)" ge 0.3.0-2
 
     rm -rf /workspace/work/src /workspace/work/build /workspace/work/devel /workspace/work/install-root
     mkdir -p /workspace/work/src/xgc2-gazebo-sim-visualization
